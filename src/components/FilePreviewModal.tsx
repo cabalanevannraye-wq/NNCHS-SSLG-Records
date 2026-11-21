@@ -22,6 +22,7 @@ export function FilePreviewModal({
     mimeType?.includes('wordprocessingml') ||
     mimeType?.includes('msword') ||
     fileUrl.toLowerCase().includes('.doc');
+  const isExternalDriveLink = fileUrl.startsWith('https://drive.google.com/');
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
@@ -61,7 +62,37 @@ export function FilePreviewModal({
         </div>
 
         <div className="flex-1 bg-slate-100 overflow-auto flex items-center justify-center p-2">
-          {isImage ? (
+          {isExternalDriveLink ? (
+            <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-md text-center space-y-3">
+              <p className="text-sm font-semibold text-slate-900">
+                File Stored in Google Drive
+              </p>
+              <p className="text-xs text-slate-600">
+                Open this file in Google Drive or download a copy directly to view and print.
+              </p>
+              <div className="flex items-center justify-center gap-2 pt-1">
+                <a
+                  href={fileUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-blue-800 text-white rounded-lg hover:bg-blue-900"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Open in Google Drive</span>
+                </a>
+                {downloadUrl && (
+                  <a
+                    href={downloadUrl}
+                    download
+                    className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download</span>
+                  </a>
+                )}
+              </div>
+            </div>
+          ) : isImage ? (
             <img
               src={fileUrl}
               alt={title}

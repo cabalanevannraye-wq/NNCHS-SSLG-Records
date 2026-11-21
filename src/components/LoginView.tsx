@@ -1,32 +1,59 @@
-import React, { useState } from 'react';
-import { ArrowRight, Eye, EyeOff } from 'lucide-react';
-import { api } from '../lib/api.ts';
-import type { SystemSettings, UserAccount } from '../types.ts';
+import { useState } from 'react';
+import { GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { AlertCircle, ArrowRight, LogOut } from 'lucide-react';
+import {
+  auth,
+  clearGoogleDriveAccessToken,
+  googleProvider,
+  setGoogleDriveAccessToken,
+} from '../firebase.ts';
 import { SSLGCrest } from './SSLGCrest.tsx';
 
 interface LoginViewProps {
-  onSuccess: (token: string, user: UserAccount, settings: SystemSettings) => void;
+  authBlockState?: {
+    status: 'unauthorized' | 'disabled' | 'unverified';
+    email: string;
+  } | null;
+  onClearBlockState?: () => void;
 }
 
-export function LoginView({ onSuccess }: LoginViewProps) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+export function LoginView({ authBlockState, onClearBlockState }: LoginViewProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGoogleSignIn = async () => {
     setError('');
     setLoading(true);
     try {
-      const res = await api.login(email, password);
-      onSuccess(res.token, res.user, res.settings);
+      const result = await signInWithPopup(auth, googleProvider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        setGoogleDriveAccessToken(credential.accessToken);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid username or password.');
+      const code = (err as { code?: string })?.code;
+      if (code === 'auth/popup-closed-by-user') {
+        setError('Sign-in window was closed before completing Google authentication.');
+      } else if (code === 'auth/popup-blocked') {
+        setError('Pop-up was blocked by your browser. Please allow pop-ups for this site and try again.');
+      } else if (code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+        setError(
+          `Domain "${host}" is not yet authorized in Firebase Authentication. Add "${host}" under Firebase Console → Authentication → Settings → Authorized domains.`
+        );
+      } else {
+        setError(err instanceof Error ? err.message : 'Unable to sign in with Google.');
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSwitchAccount = async () => {
+    setError('');
+    clearGoogleDriveAccessToken();
+    await signOut(auth);
+    onClearBlockState?.();
   };
 
   return (
@@ -46,64 +73,82 @@ export function LoginView({ onSuccess }: LoginViewProps) {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="login-email" className="block text-sm font-semibold text-slate-800 mb-1.5">
-              Account Email
-            </label>
-            <input
-              id="login-email"
-              type="email"
-              autoComplete="username"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="name@sslg.edu"
-              className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-800 focus:border-blue-800"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="login-password"
-              className="block text-sm font-semibold text-slate-800 mb-1.5"
-            >
-              Password
-            </label>
-            <div className="relative">
-              <input
-                id="login-password"
-                type={showPassword ? 'text' : 'password'}
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
-                className="w-full pl-3.5 pr-10 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-800 focus:border-blue-800"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((prev) => !prev)}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-900 rounded cursor-pointer"
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
+        {authBlockState ? (
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-950 space-y-2">
+              <div className="flex items-center gap-2 font-bold">
+                <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>
+                  {authBlockState.status === 'disabled'
+                    ? 'Account Deactivated'
+                    : authBlockState.status === 'unverified'
+                    ? 'Email Verification Required'
+                    : 'Pending Admin Authorization'}
+                </span>
+              </div>
+              <p className="text-xs text-amber-900 leading-relaxed">
+                {authBlockState.status === 'disabled' ? (
+                  <>
+                    The account <strong>{authBlockState.email}</strong> has been deactivated by the
+                    SSLG President (Admin).
+                  </>
+                ) : authBlockState.status === 'unverified' ? (
+                  <>
+                    Your Google account email must be verified before accessing SSLG Records.
+                  </>
+                ) : (
+                  <>
+                    <strong>{authBlockState.email}</strong> is not yet registered in the SSLG
+                    Records portal. Ask the SSLG President (Admin) to add your Google email under{' '}
+                    <strong>Accounts &amp; Settings</strong>.
+                  </>
+                )}
+              </p>
             </div>
-          </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 px-4 bg-slate-950 hover:bg-blue-900 text-white font-semibold text-sm rounded-lg transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer mt-2"
-          >
-            <span>{loading ? 'Signing in...' : 'Sign In'}</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </form>
+            <button
+              type="button"
+              onClick={handleSwitchAccount}
+              className="w-full py-2.5 px-4 bg-slate-950 hover:bg-blue-900 text-white font-semibold text-sm rounded-lg transition-colors inline-flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Sign Out / Switch Google Account</span>
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={handleGoogleSignIn}
+              className="w-full py-3 px-4 bg-slate-950 hover:bg-blue-900 text-white font-semibold text-sm rounded-lg transition-colors inline-flex items-center justify-center gap-3 disabled:opacity-60 cursor-pointer"
+            >
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="#EA4335"
+                  d="M12 10.2v3.9h5.5c-.2 1.3-1.5 3.9-5.5 3.9-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.7 3.5 14.6 2.6 12 2.6 6.8 2.6 2.6 6.8 2.6 12s4.2 9.4 9.4 9.4c5.4 0 9-3.8 9-9.1 0-.6-.1-1.1-.2-1.6H12z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M3.7 7.4l3.2 2.3C7.8 7.6 9.7 6.3 12 6.3c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.7 3.5 14.6 2.6 12 2.6 8.3 2.6 5.1 4.6 3.7 7.4z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M12 21.4c2.5 0 4.7-.8 6.2-2.3l-2.9-2.4c-.8.6-1.9 1-3.3 1-3.9 0-5.2-2.6-5.5-3.9l-3.2 2.5c1.4 2.9 4.5 5.1 8.7 5.1z"
+                />
+                <path
+                  fill="#4285F4"
+                  d="M20.8 12.3c0-.6-.1-1.1-.2-1.6H12v3.9h5.5c-.3 1.4-1.1 2.4-2.1 3l2.9 2.4c1.7-1.6 2.5-3.9 2.5-7.7z"
+                />
+              </svg>
+              <span>{loading ? 'Connecting to Google...' : 'Sign In with Google'}</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         <p className="mt-6 text-center text-xs text-slate-400">
-          Accounts are issued by the SSLG President (Admin).
+          Authorized SSLG Officers &amp; School Clubs only. Accounts are issued by the SSLG President (Admin).
         </p>
       </div>
     </div>

@@ -3,10 +3,12 @@ import {
   Check,
   CheckCircle2,
   Download,
+  ExternalLink,
   Eye,
   FilePlus2,
   FileText,
   FileUp,
+  HardDrive,
   PenTool,
   Printer,
   ScanLine,
@@ -14,7 +16,10 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react';
-import { api, getDocumentFileUrl, getHardcopyFileUrl } from '../lib/api.ts';
+import { connectGoogleDriveWithPopup, getGoogleDriveAccessToken } from '../firebase.ts';
+import { getDocumentFileUrl, getHardcopyFileUrl } from '../lib/api.ts';
+import { firebaseService } from '../lib/firebaseService.ts';
+import { downloadDriveFileBlob, uploadBlobToGoogleDrive } from '../lib/googleDrive.ts';
 import {
   ACCOMPLISHMENT_CATEGORIES,
   CORE_VALUES,
@@ -70,7 +75,9 @@ export function DocumentTrackerView({
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [coreValueFilter, setCoreValueFilter] = useState<string>('ALL');
   const [busyAction, setBusyAction] = useState(false);
+  const [savingToDrive, setSavingToDrive] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [driveMessage, setDriveMessage] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -136,7 +143,7 @@ export function DocumentTrackerView({
     setActionError('');
     setBusyAction(true);
     try {
-      const updated = await api.receiveForEsign(selectedDoc.id);
+      const updated = await firebaseService.receiveForEsign(selectedDoc, currentUser);
       onDocumentUpdated(updated);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to receive document');
@@ -150,7 +157,7 @@ export function DocumentTrackerView({
     setActionError('');
     setBusyAction(true);
     try {
-      const updated = await api.markDocumentPrinted(selectedDoc.id);
+      const updated = await firebaseService.markDocumentPrinted(selectedDoc, currentUser);
       onDocumentUpdated(updated);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to mark as printed');
@@ -168,11 +175,16 @@ export function DocumentTrackerView({
     setActionError('');
     setBusyAction(true);
     try {
-      const fd = new FormData();
-      fd.append('file', scanFile);
-      fd.append('wetInkSignatories', scanSignatories);
-      fd.append('notes', scanNotes);
-      const updated = await api.uploadHardcopyScanForDoc(selectedDoc.id, fd);
+      const updated = await firebaseService.uploadHardcopyScanForDoc(
+        selectedDoc,
+        currentUser,
+        documents,
+        {
+          file: scanFile,
+          wetInkSignatories: scanSignatories,
+          notes: scanNotes,
+        }
+      );
       onDocumentUpdated(updated);
       setShowScanUpload(false);
       setScanFile(null);
@@ -185,16 +197,64 @@ export function DocumentTrackerView({
   };
 
   const handleDeleteDocument = async (docId: string) => {
+    const target = documents.find((d) => d.id === docId);
+    if (!target) return;
     setActionError('');
     setBusyAction(true);
     try {
-      await api.deleteDocument(docId);
+      await firebaseService.deleteDocument(target, documents);
       setConfirmDeleteId(null);
       onDocumentDeleted(docId);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to delete file');
     } finally {
       setBusyAction(false);
+    }
+  };
+
+  const handleSaveDocToDrive = async () => {
+    if (!selectedDoc) return;
+    setActionError('');
+    setDriveMessage('');
+    setSavingToDrive(true);
+    try {
+      if (!getGoogleDriveAccessToken()) {
+        await connectGoogleDriveWithPopup();
+      }
+      const activePath = selectedDoc.signedFilePath || selectedDoc.filePath;
+      let blob: Blob;
+      const fileName = selectedDoc.signedFilePath
+        ? `${selectedDoc.controlNumber || selectedDoc.id}_Signed.pdf`
+        : selectedDoc.fileName;
+      const mimeType = selectedDoc.signedFilePath ? 'application/pdf' : selectedDoc.fileMimeType;
+
+      if (activePath.startsWith('drive:')) {
+        const { blob: driveBlob } = await downloadDriveFileBlob(activePath.slice(6), mimeType);
+        blob = driveBlob;
+      } else if (activePath.startsWith('local:')) {
+        throw new Error(
+          'This file was logged without backend storage or Drive. Open the Google Drive tab to upload it directly.'
+        );
+      } else {
+        const res = await fetch(getDocumentFileUrl(selectedDoc));
+        if (!res.ok) {
+          throw new Error(`Could not fetch file (${res.status}) for Google Drive backup.`);
+        }
+        blob = await res.blob();
+      }
+
+      const uploaded = await uploadBlobToGoogleDrive({
+        blob,
+        fileName,
+        mimeType,
+      });
+      const updated = await firebaseService.attachDriveFileToDocument(selectedDoc, uploaded);
+      onDocumentUpdated(updated);
+      setDriveMessage('Saved backup copy to Google Drive (SSLG Records folder).');
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to save copy to Google Drive');
+    } finally {
+      setSavingToDrive(false);
     }
   };
 
@@ -331,6 +391,7 @@ export function DocumentTrackerView({
                       setShowScanUpload(false);
                       setConfirmDeleteId(null);
                       setActionError('');
+                      setDriveMessage('');
                     }}
                     className={`w-full text-left p-4 transition-colors cursor-pointer ${
                       isSelected ? 'bg-blue-50/70' : 'hover:bg-slate-50'
@@ -421,7 +482,7 @@ export function DocumentTrackerView({
                       </span>
                     </button>
                     <a
-                      href={getDocumentFileUrl(selectedDoc.id, { download: true })}
+                      href={getDocumentFileUrl(selectedDoc, { download: true })}
                       download
                       className="px-3.5 py-2 text-xs font-semibold border border-slate-300 text-slate-800 hover:bg-slate-50 rounded-lg inline-flex items-center gap-1.5"
                     >
@@ -441,6 +502,32 @@ export function DocumentTrackerView({
                     >
                       <Printer className="w-3.5 h-3.5" />
                       <span>Transmittal Slip</span>
+                    </button>
+                    {selectedDoc.driveWebViewLink && (
+                      <a
+                        href={selectedDoc.driveWebViewLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3.5 py-2 text-xs font-semibold border border-blue-200 bg-blue-50 text-blue-900 hover:bg-blue-100 rounded-lg inline-flex items-center gap-1.5"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Open in Drive</span>
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      disabled={savingToDrive}
+                      onClick={handleSaveDocToDrive}
+                      className="px-3.5 py-2 text-xs font-semibold border border-slate-300 text-slate-800 hover:bg-slate-50 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-60 cursor-pointer"
+                    >
+                      <HardDrive className="w-3.5 h-3.5 text-blue-800" />
+                      <span>
+                        {savingToDrive
+                          ? 'Saving to Drive...'
+                          : selectedDoc.driveFileId
+                          ? 'Sync Copy to Drive'
+                          : 'Save to Drive'}
+                      </span>
                     </button>
                   </div>
 
@@ -554,6 +641,23 @@ export function DocumentTrackerView({
                 {actionError && (
                   <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-sm text-rose-800">
                     {actionError}
+                  </div>
+                )}
+
+                {driveMessage && (
+                  <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-900 flex items-center justify-between gap-2">
+                    <span>{driveMessage}</span>
+                    {selectedDoc.driveWebViewLink && (
+                      <a
+                        href={selectedDoc.driveWebViewLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs font-bold text-emerald-800 hover:underline inline-flex items-center gap-1 shrink-0"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Open in Drive</span>
+                      </a>
+                    )}
                   </div>
                 )}
 
@@ -797,7 +901,7 @@ export function DocumentTrackerView({
                           <span>View Scanned Hardcopy</span>
                         </button>
                         <a
-                          href={getHardcopyFileUrl(selectedDoc.id, true)}
+                          href={getHardcopyFileUrl(selectedDoc, true)}
                           download
                           className="px-3.5 py-2 text-xs font-semibold border border-slate-300 text-slate-800 hover:bg-slate-50 rounded-lg inline-flex items-center gap-1.5"
                         >

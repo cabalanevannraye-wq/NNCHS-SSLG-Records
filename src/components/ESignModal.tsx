@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, Eraser, PenTool, Upload, X } from 'lucide-react';
-import { api } from '../lib/api.ts';
+import { firebaseService } from '../lib/firebaseService.ts';
 import type { SSLGDocument, UserAccount } from '../types.ts';
 
 interface ESignModalProps {
@@ -117,7 +117,7 @@ export function ESignModal({ doc, currentUser, onClose, onSigned }: ESignModalPr
     setError('');
     setSubmitting(true);
     try {
-      const updated = await api.esignDocument(doc.id, {
+      const updated = await firebaseService.esignDocument(doc, currentUser, {
         signatureDataUrl,
         remarks: remarks.trim() || undefined,
       });

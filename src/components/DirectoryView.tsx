@@ -58,7 +58,7 @@ export function DirectoryView({
         entry.positionOrClub.toLowerCase().includes(q) ||
         entry.fullName.toLowerCase().includes(q) ||
         entry.department.toLowerCase().includes(q) ||
-        entry.email.toLowerCase().includes(q)
+        (entry.email || '').toLowerCase().includes(q)
       );
     });
   }, [directory, roleFilter, search]);
@@ -243,11 +243,15 @@ export function DirectoryView({
                         </span>
                         <span aria-hidden="true">·</span>
                         <span>{selectedEntry.department}</span>
-                        <span aria-hidden="true">·</span>
-                        <span className="inline-flex items-center gap-1">
-                          <Mail className="w-3 h-3 text-slate-400" />
-                          <span>{selectedEntry.email}</span>
-                        </span>
+                        {selectedEntry.email && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="inline-flex items-center gap-1">
+                              <Mail className="w-3 h-3 text-slate-400" />
+                              <span>{selectedEntry.email}</span>
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

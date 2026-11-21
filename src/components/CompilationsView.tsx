@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Download, FileStack, Printer } from 'lucide-react';
-import { getCompilationPdfUrl } from '../lib/api.ts';
+import { Download, ExternalLink, FileStack, HardDrive, Printer } from 'lucide-react';
+import { connectGoogleDriveWithPopup, getGoogleDriveAccessToken } from '../firebase.ts';
+import { api } from '../lib/api.ts';
+import { uploadBlobToGoogleDrive } from '../lib/googleDrive.ts';
 import {
   ACCOMPLISHMENT_CATEGORIES,
   ALL_CATEGORIES,
@@ -117,6 +119,7 @@ const MONTHS = [
 
 export function CompilationsView({
   documents,
+  settings,
   onPrintCompilationSheet,
   onOpenCompiledPdf,
 }: CompilationsViewProps) {
@@ -127,6 +130,10 @@ export function CompilationsView({
   const [quarter, setQuarter] = useState('Q4');
   const [category, setCategory] = useState('ALL');
   const [coreValue, setCoreValue] = useState('ALL');
+  const [compilingPdf, setCompilingPdf] = useState(false);
+  const [savingToDrive, setSavingToDrive] = useState(false);
+  const [driveSavedLink, setDriveSavedLink] = useState<string | null>(null);
+  const [driveError, setDriveError] = useState('');
 
   const categoryChoices = useMemo(() => {
     if (docType === 'general') return GENERAL_CATEGORIES;
@@ -180,15 +187,79 @@ export function CompilationsView({
   const categoryLabel =
     coreValue !== 'ALL' ? `${baseCategoryLabel} (${coreValue})` : baseCategoryLabel;
 
-  const compiledPdfUrl = getCompilationPdfUrl({
-    periodType,
-    year,
-    month,
-    quarter,
-    category,
-    coreValue,
-    docType,
-  });
+  const handleOpenMergedPdf = async () => {
+    setCompilingPdf(true);
+    try {
+      const blob = await api.compileBinderPdfBlob({
+        documents: filteredDocs,
+        organizationHeader: settings.organizationHeader,
+        schoolYear: settings.schoolYear,
+        periodLabel,
+        categoryLabel,
+      });
+      const blobUrl = URL.createObjectURL(blob);
+      onOpenCompiledPdf(
+        blobUrl,
+        `Compiled PDF Binder — ${periodLabel} (${categoryLabel})`
+      );
+    } finally {
+      setCompilingPdf(false);
+    }
+  };
+
+  const handleDownloadMergedPdf = async () => {
+    setCompilingPdf(true);
+    try {
+      const blob = await api.compileBinderPdfBlob({
+        documents: filteredDocs,
+        organizationHeader: settings.organizationHeader,
+        schoolYear: settings.schoolYear,
+        periodLabel,
+        categoryLabel,
+      });
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `SSLG_Compilation_${periodLabel.replace(/\s+/g, '_')}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+    } finally {
+      setCompilingPdf(false);
+    }
+  };
+
+  const handleSaveBinderToDrive = async () => {
+    setDriveError('');
+    setDriveSavedLink(null);
+    setSavingToDrive(true);
+    try {
+      if (!getGoogleDriveAccessToken()) {
+        await connectGoogleDriveWithPopup();
+      }
+      const blob = await api.compileBinderPdfBlob({
+        documents: filteredDocs,
+        organizationHeader: settings.organizationHeader,
+        schoolYear: settings.schoolYear,
+        periodLabel,
+        categoryLabel,
+      });
+      const fileName = `SSLG_Compilation_${periodLabel.replace(/\s+/g, '_')}.pdf`;
+      const uploaded = await uploadBlobToGoogleDrive({
+        blob,
+        fileName,
+        mimeType: 'application/pdf',
+      });
+      setDriveSavedLink(
+        uploaded.webViewLink || `https://drive.google.com/file/d/${encodeURIComponent(uploaded.id)}/view`
+      );
+    } catch (err) {
+      setDriveError(err instanceof Error ? err.message : 'Failed to save binder to Google Drive');
+    } finally {
+      setSavingToDrive(false);
+    }
+  };
 
   const stage5Count = filteredDocs.filter((d) => d.currentStage === 5).length;
   const numberedCount = filteredDocs.filter((d) => d.controlNumber !== null).length;
@@ -268,19 +339,44 @@ export function CompilationsView({
             </button>
             <button
               type="button"
-              onClick={() =>
-                onOpenCompiledPdf(
-                  compiledPdfUrl,
-                  `Compiled PDF Binder — ${periodLabel} (${categoryLabel})`
-                )
-              }
-              className="px-4 py-2 text-sm font-semibold bg-blue-800 hover:bg-blue-900 text-white rounded-lg inline-flex items-center gap-2 cursor-pointer whitespace-nowrap"
+              disabled={compilingPdf || savingToDrive}
+              onClick={handleSaveBinderToDrive}
+              className="px-4 py-2 text-sm font-semibold border border-slate-300 text-slate-800 bg-white hover:bg-slate-50 rounded-lg inline-flex items-center gap-2 disabled:opacity-60 cursor-pointer whitespace-nowrap"
+            >
+              <HardDrive className="w-4 h-4 text-blue-800" />
+              <span>{savingToDrive ? 'Saving to Drive...' : 'Save Binder to Drive'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={compilingPdf}
+              onClick={handleOpenMergedPdf}
+              className="px-4 py-2 text-sm font-semibold bg-blue-800 hover:bg-blue-900 text-white rounded-lg inline-flex items-center gap-2 disabled:opacity-60 cursor-pointer whitespace-nowrap"
             >
               <FileStack className="w-4 h-4" />
-              <span>Open Merged Binder PDF</span>
+              <span>{compilingPdf ? 'Compiling Binder...' : 'Open Merged Binder PDF'}</span>
             </button>
           </div>
         </div>
+
+        {driveError && (
+          <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
+            {driveError}
+          </div>
+        )}
+        {driveSavedLink && (
+          <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between gap-2">
+            <span>Compiled PDF binder uploaded to Google Drive (SSLG Records folder).</span>
+            <a
+              href={driveSavedLink}
+              target="_blank"
+              rel="noreferrer"
+              className="font-bold text-emerald-800 hover:underline inline-flex items-center gap-1 shrink-0"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Open in Drive</span>
+            </a>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-3">
           <select
@@ -376,14 +472,15 @@ export function CompilationsView({
           <h3 className="text-sm font-bold text-slate-900">
             {periodLabel} · {categoryLabel}
           </h3>
-          <a
-            href={compiledPdfUrl}
-            download={`SSLG_Compilation_${periodLabel.replace(/\s+/g, '_')}.pdf`}
-            className="text-xs font-semibold text-blue-800 hover:underline inline-flex items-center gap-1"
+          <button
+            type="button"
+            disabled={compilingPdf}
+            onClick={handleDownloadMergedPdf}
+            className="text-xs font-semibold text-blue-800 hover:underline inline-flex items-center gap-1 disabled:opacity-60 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Download Merged PDF</span>
-          </a>
+            <span>{compilingPdf ? 'Compiling...' : 'Download Merged PDF'}</span>
+          </button>
         </div>
 
         <div className="overflow-x-auto">

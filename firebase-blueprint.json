@@ -1,0 +1,416 @@
+{
+  "entities": {
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Trusted marker document granting SSLG President (Admin) privileges to a verified Firebase user.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "grantedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "grantedBy", "createdAt"]
+    },
+    "AccountInvite": {
+      "title": "AccountInvite",
+      "description": "Admin-issued authorization record mapping a verified Google email to an SSLG Officer or School Club role.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "officer", "organization"]
+        },
+        "positionOrClub": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "claimedUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["email", "fullName", "role", "positionOrClub", "department", "active", "createdAt", "updatedAt"]
+    },
+    "UserDirectoryProfile": {
+      "title": "UserDirectoryProfile",
+      "description": "Non-PII directory profile for SSLG officers and school clubs (excludes email and private PII).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "officer", "organization"]
+        },
+        "positionOrClub": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "avatarDataUrl": {
+          "type": "string",
+          "maxLength": 300000
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "fullName", "role", "positionOrClub", "department", "active", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "PII-isolated private account data containing the user's verified email and status.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "officer", "organization"]
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "role", "active", "createdAt", "updatedAt"]
+    },
+    "ContributorStat": {
+      "title": "ContributorStat",
+      "description": "Aggregated non-PII submission counts per account for the dashboard leaderboard and directory.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "isPublicStat": {
+          "type": "boolean"
+        },
+        "totalPassed": {
+          "type": "number"
+        },
+        "ongoingCount": {
+          "type": "number"
+        },
+        "completedCount": {
+          "type": "number"
+        },
+        "generalCount": {
+          "type": "number"
+        },
+        "accomplishmentCount": {
+          "type": "number"
+        },
+        "latestDocumentDate": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "isPublicStat", "totalPassed", "ongoingCount", "completedCount", "generalCount", "accomplishmentCount", "updatedAt"]
+    },
+    "SystemSettingsDoc": {
+      "title": "SystemSettingsDoc",
+      "description": "Global school year, organization header, and sequential Control Number counters.",
+      "type": "object",
+      "properties": {
+        "organizationHeader": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "schoolYear": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 30
+        },
+        "generalPrefix": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 30
+        },
+        "generalNextSequence": {
+          "type": "number"
+        },
+        "accomplishmentPrefix": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 30
+        },
+        "accomplishmentNextSequence": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["organizationHeader", "schoolYear", "generalPrefix", "generalNextSequence", "accomplishmentPrefix", "accomplishmentNextSequence", "updatedAt"]
+    },
+    "SSLGDocumentRecord": {
+      "title": "SSLGDocumentRecord",
+      "description": "Tracked SSLG General Document or Accomplishment Report following the 5-stage transmittal workflow.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "docType": {
+          "type": "string",
+          "enum": ["general", "accomplishment"]
+        },
+        "controlNumber": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "coreValue": {
+          "type": "string",
+          "enum": ["Maka-Diyos", "Maka-Tao", "Maka-Kalikasan", "Makabansa"]
+        },
+        "documentDate": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 20,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1200
+        },
+        "submittedByUserId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "organizationName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 260
+        },
+        "fileMimeType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "filePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "signedFilePath": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "driveFileId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "driveWebViewLink": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "fileSize": {
+          "type": "number"
+        },
+        "currentStage": {
+          "type": "number"
+        },
+        "stageLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "printedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "printedByName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "reviewerUids": {
+          "type": "array"
+        },
+        "transmittalHistory": {
+          "type": "array"
+        },
+        "signatures": {
+          "type": "array"
+        },
+        "hardcopyScan": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "docType",
+        "title",
+        "category",
+        "documentDate",
+        "purpose",
+        "submittedByUserId",
+        "authorName",
+        "organizationName",
+        "fileName",
+        "fileMimeType",
+        "filePath",
+        "fileSize",
+        "currentStage",
+        "stageLabel",
+        "reviewerUids",
+        "transmittalHistory",
+        "signatures",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Trusted Admin role marker collection."
+    },
+    "/invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/AccountInvite" },
+      "description": "Admin-managed account invitations keyed by sanitized email ID."
+    },
+    "/user_directory/{uid}": {
+      "schema": { "$ref": "#/entities/UserDirectoryProfile" },
+      "description": "Non-PII profile directory for clubs and SSLG officers."
+    },
+    "/user_private/{uid}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "PII-isolated user email and role metadata."
+    },
+    "/contributor_stats/{uid}": {
+      "schema": { "$ref": "#/entities/ContributorStat" },
+      "description": "Per-account leaderboard and directory document counts."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/SystemSettingsDoc" },
+      "description": "System header and control number counters (global)."
+    },
+    "/documents/{docId}": {
+      "schema": { "$ref": "#/entities/SSLGDocumentRecord" },
+      "description": "SSLG General Documents and Accomplishment Reports across Stages 1 to 5."
+    }
+  }
+}

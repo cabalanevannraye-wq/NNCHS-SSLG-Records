@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
   Award,
   BookOpenCheck,
@@ -7,6 +8,7 @@ import {
   FilePlus2,
   FileStack,
   FileText,
+  HardDrive,
   LayoutDashboard,
   ListOrdered,
   LogOut,
@@ -14,6 +16,12 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import {
+  auth,
+  clearGoogleDriveAccessToken,
+  connectGoogleDriveWithPopup,
+  getGoogleDriveAccessToken,
+} from './firebase.ts';
 import { AdminAccountsView } from './components/AdminAccountsView.tsx';
 import {
   CompilationPrintableSheet,
@@ -26,6 +34,7 @@ import { DocumentTrackerView } from './components/DocumentTrackerView.tsx';
 import { EartagModal, EartagPrintableSheet } from './components/EartagModal.tsx';
 import { ESignModal } from './components/ESignModal.tsx';
 import { FilePreviewModal } from './components/FilePreviewModal.tsx';
+import { GoogleDriveView } from './components/GoogleDriveView.tsx';
 import { LoginView } from './components/LoginView.tsx';
 import { PassDocumentModal } from './components/PassDocumentModal.tsx';
 import {
@@ -38,17 +47,17 @@ import {
   TransmittalPrintableSheet,
   TransmittalSlipModal,
 } from './components/TransmittalSlipModal.tsx';
+import { getDocumentFileUrl, getHardcopyFileUrl } from './lib/api.ts';
+import { downloadDriveFileBlob } from './lib/googleDrive.ts';
 import {
-  api,
-  getDocumentFileUrl,
-  getHardcopyFileUrl,
-  getStoredToken,
-  setStoredToken,
-} from './lib/api.ts';
+  buildLeaderboardAndDirectory,
+  DEFAULT_SETTINGS,
+  firebaseService,
+  resolveSignedInUser,
+  subscribeWorkspaceData,
+} from './lib/firebaseService.ts';
 import type {
-  DirectoryEntry,
   DocumentModuleType,
-  LeaderboardEntry,
   SSLGDocument,
   SystemSettings,
   UserAccount,
@@ -62,6 +71,7 @@ type NavTab =
   | 'directory'
   | 'compilations'
   | 'hardcopy'
+  | 'drive'
   | 'accounts';
 
 type PrintPayload =
@@ -83,17 +93,28 @@ type PrintPayload =
 export default function App() {
   const [initializing, setInitializing] = useState(true);
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
-  const [settings, setSettings] = useState<SystemSettings>({
-    organizationHeader: 'Supreme Secondary Learner Government',
-    schoolYear: '2026-2027',
-    generalPrefix: 'SSLG-2026',
-    generalNextSequence: 1,
-    accomplishmentPrefix: 'AR-2026',
-    accomplishmentNextSequence: 1,
-  });
+  const [authBlockState, setAuthBlockState] = useState<{
+    status: 'unauthorized' | 'disabled' | 'unverified';
+    email: string;
+  } | null>(null);
+
+  const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SETTINGS);
   const [documents, setDocuments] = useState<SSLGDocument[]>([]);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
+  const [directoryProfiles, setDirectoryProfiles] = useState<UserAccount[]>([]);
+  const [contributorStats, setContributorStats] = useState<
+    Map<
+      string,
+      {
+        totalPassed: number;
+        ongoingCount: number;
+        completedCount: number;
+        generalCount: number;
+        accomplishmentCount: number;
+        latestDocumentDate: string | null;
+      }
+    >
+  >(new Map());
+
   const [activeTab, setActiveTab] = useState<NavTab>('overview');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [selectedDirectoryUserId, setSelectedDirectoryUserId] = useState<string | null>(null);
@@ -120,84 +141,104 @@ export default function App() {
   // Print-only state
   const [printPayload, setPrintPayload] = useState<PrintPayload>(null);
 
-  const refreshRankingsAndDirectory = async () => {
-    try {
-      const [lb, dir] = await Promise.all([api.getLeaderboard(), api.getDirectory()]);
-      setLeaderboard(lb);
-      setDirectory(dir);
-    } catch {
-      // ignore background refresh error
-    }
-  };
-
-  const loadWorkspaceData = async () => {
-    const [docs, lb, dir] = await Promise.all([
-      api.getDocuments(),
-      api.getLeaderboard(),
-      api.getDirectory(),
-    ]);
-    setDocuments(docs);
-    setLeaderboard(lb);
-    setDirectory(dir);
-    if (docs.length > 0 && !selectedDocId) {
-      setSelectedDocId(docs[0].id);
-    }
-  };
-
   useEffect(() => {
-    const token = getStoredToken();
-    if (!token) {
-      setInitializing(false);
-      return;
-    }
-    api
-      .me()
-      .then(async (res) => {
-        setCurrentUser(res.user);
-        setSettings(res.settings);
-        await loadWorkspaceData();
-      })
-      .catch(() => {
-        setStoredToken(null);
-      })
-      .finally(() => setInitializing(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let unsubWorkspace: (() => void) | null = null;
+
+    const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
+      if (unsubWorkspace) {
+        unsubWorkspace();
+        unsubWorkspace = null;
+      }
+
+      if (!fbUser) {
+        clearGoogleDriveAccessToken();
+        setCurrentUser(null);
+        setAuthBlockState(null);
+        setDocuments([]);
+        setDirectoryProfiles([]);
+        setContributorStats(new Map());
+        setSelectedDocId(null);
+        setSelectedDirectoryUserId(null);
+        setInitializing(false);
+        return;
+      }
+
+      setInitializing(true);
+      try {
+        const result = await resolveSignedInUser(fbUser);
+        if (result.status !== 'authorized') {
+          setCurrentUser(null);
+          setAuthBlockState({ status: result.status, email: result.email });
+          setInitializing(false);
+          return;
+        }
+
+        setAuthBlockState(null);
+        setCurrentUser(result.user);
+        setSettings(result.settings);
+        setActiveTab('overview');
+
+        unsubWorkspace = subscribeWorkspaceData(result.user, {
+          onSettings: (s) => setSettings(s),
+          onDocuments: (docs) => {
+            setDocuments(docs);
+            setSelectedDocId((prev) => {
+              if (prev && docs.some((d) => d.id === prev)) return prev;
+              return docs[0]?.id ?? null;
+            });
+          },
+          onDirectoryProfiles: (profiles) => {
+            setDirectoryProfiles(profiles);
+            const updatedSelf = profiles.find((p) => p.id === result.user.id);
+            if (updatedSelf) {
+              setCurrentUser((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      fullName: updatedSelf.fullName,
+                      role: updatedSelf.role,
+                      positionOrClub: updatedSelf.positionOrClub,
+                      department: updatedSelf.department,
+                      avatarDataUrl: updatedSelf.avatarDataUrl ?? null,
+                    }
+                  : prev
+              );
+            }
+          },
+          onStats: (statsMap) => setContributorStats(statsMap),
+        });
+      } finally {
+        setInitializing(false);
+      }
+    });
+
+    return () => {
+      if (unsubWorkspace) unsubWorkspace();
+      unsubAuth();
+    };
   }, []);
 
-  const handleLoginSuccess = async (
-    token: string,
-    user: UserAccount,
-    sysSettings: SystemSettings
-  ) => {
-    setStoredToken(token);
-    setCurrentUser(user);
-    setSettings(sysSettings);
-    setActiveTab('overview');
-    await loadWorkspaceData();
-  };
+  const { leaderboard, directory } = useMemo(
+    () => buildLeaderboardAndDirectory(directoryProfiles, contributorStats),
+    [directoryProfiles, contributorStats]
+  );
 
-  const handleLogout = () => {
-    setStoredToken(null);
-    setCurrentUser(null);
-    setDocuments([]);
-    setLeaderboard([]);
-    setDirectory([]);
-    setSelectedDocId(null);
-    setSelectedDirectoryUserId(null);
+  const handleLogout = async () => {
+    clearGoogleDriveAccessToken();
+    await signOut(auth);
   };
 
   const handleUserUpdated = (updatedUser: UserAccount) => {
     setCurrentUser(updatedUser);
-    void refreshRankingsAndDirectory();
   };
 
   const handleSidebarAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
+    if (!file || !currentUser) return;
     try {
       const dataUrl = await resizeImageFileToDataUrl(file, 256);
-      const updated = await api.updateMyAvatar(dataUrl);
+      const updated = await firebaseService.updateMyAvatar(currentUser, dataUrl);
       handleUserUpdated(updated);
     } catch {
       // ignore invalid file silently from quick sidebar trigger
@@ -205,14 +246,12 @@ export default function App() {
   };
 
   const handleDocumentCreated = (doc: SSLGDocument) => {
-    setDocuments((prev) => [doc, ...prev]);
+    setDocuments((prev) => (prev.some((d) => d.id === doc.id) ? prev : [doc, ...prev]));
     setSelectedDocId(doc.id);
-    void refreshRankingsAndDirectory();
   };
 
   const handleDocumentUpdated = (updated: SSLGDocument) => {
     setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
-    void refreshRankingsAndDirectory();
   };
 
   const handleDocumentDeleted = (deletedId: string) => {
@@ -223,7 +262,6 @@ export default function App() {
       }
       return next;
     });
-    void refreshRankingsAndDirectory();
   };
 
   const openDocInTracker = (doc: SSLGDocument) => {
@@ -231,24 +269,79 @@ export default function App() {
     setActiveTab(doc.docType === 'accomplishment' ? 'accomplishments' : 'general');
   };
 
-  const openFilePreview = (doc: SSLGDocument) => {
+  const openFilePreview = async (doc: SSLGDocument) => {
+    const activePath = doc.signedFilePath || doc.filePath;
+    if (activePath.startsWith('drive:')) {
+      const driveId = activePath.slice(6);
+      const mime = doc.signedFilePath ? 'application/pdf' : doc.fileMimeType;
+      try {
+        if (!getGoogleDriveAccessToken()) {
+          await connectGoogleDriveWithPopup();
+        }
+        const { blob, resolvedMimeType } = await downloadDriveFileBlob(driveId, mime);
+        const blobUrl = URL.createObjectURL(blob);
+        setPreviewModal({
+          title: `${doc.controlNumber || 'Pending Control No.'} — ${doc.title}`,
+          subtitle: `${doc.organizationName} · ${doc.category} · Google Drive`,
+          fileUrl: blobUrl,
+          downloadUrl: blobUrl,
+          mimeType: resolvedMimeType,
+        });
+        return;
+      } catch {
+        // Fallback to external Google Drive preview card
+      }
+    }
+
     setPreviewModal({
       title: `${doc.controlNumber || 'Pending Control No.'} — ${doc.title}`,
       subtitle: `${doc.organizationName} · ${doc.category}`,
-      fileUrl: getDocumentFileUrl(doc.id),
-      downloadUrl: getDocumentFileUrl(doc.id, { download: true }),
+      fileUrl: getDocumentFileUrl(doc),
+      downloadUrl: getDocumentFileUrl(doc, { download: true }),
       mimeType: doc.signedFilePath ? 'application/pdf' : doc.fileMimeType,
     });
   };
 
-  const openHardcopyPreview = (doc: SSLGDocument) => {
+  const openHardcopyPreview = async (doc: SSLGDocument) => {
+    const scanPath = doc.hardcopyScan?.filePath || '';
+    if (scanPath.startsWith('drive:')) {
+      const driveId = scanPath.slice(6);
+      try {
+        if (!getGoogleDriveAccessToken()) {
+          await connectGoogleDriveWithPopup();
+        }
+        const { blob, resolvedMimeType } = await downloadDriveFileBlob(
+          driveId,
+          doc.hardcopyScan?.fileMimeType
+        );
+        const blobUrl = URL.createObjectURL(blob);
+        setPreviewModal({
+          title: `Hardcopy Scan — ${doc.controlNumber || doc.title}`,
+          subtitle: `${doc.title} · Signatories: ${doc.hardcopyScan?.wetInkSignatories || 'Verified'} · Google Drive`,
+          fileUrl: blobUrl,
+          downloadUrl: blobUrl,
+          mimeType: resolvedMimeType,
+        });
+        return;
+      } catch {
+        // Fallback to external Google Drive preview card
+      }
+    }
+
     setPreviewModal({
       title: `Hardcopy Scan — ${doc.controlNumber || doc.title}`,
       subtitle: `${doc.title} · Signatories: ${doc.hardcopyScan?.wetInkSignatories || 'Verified'}`,
-      fileUrl: getHardcopyFileUrl(doc.id),
-      downloadUrl: getHardcopyFileUrl(doc.id, true),
+      fileUrl: getHardcopyFileUrl(doc),
+      downloadUrl: getHardcopyFileUrl(doc, true),
       mimeType: doc.hardcopyScan?.fileMimeType,
     });
+  };
+
+  const closePreviewModal = () => {
+    if (previewModal?.fileUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(previewModal.fileUrl);
+    }
+    setPreviewModal(null);
   };
 
   const triggerPrint = (payload: PrintPayload) => {
@@ -270,7 +363,12 @@ export default function App() {
   }
 
   if (!currentUser) {
-    return <LoginView onSuccess={handleLoginSuccess} />;
+    return (
+      <LoginView
+        authBlockState={authBlockState}
+        onClearBlockState={() => setAuthBlockState(null)}
+      />
+    );
   }
 
   const navItems: Array<{
@@ -286,6 +384,7 @@ export default function App() {
     { id: 'directory', label: 'Club & Org Directory', icon: Building2 },
     { id: 'compilations', label: 'Compilations & Reports', icon: FileStack },
     { id: 'hardcopy', label: 'Signed Hardcopy Scans', icon: BookOpenCheck },
+    { id: 'drive', label: 'Google Drive', icon: HardDrive },
     { id: 'accounts', label: 'Accounts & Settings', icon: Users, adminOnly: true },
   ];
 
@@ -572,6 +671,8 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'drive' && <GoogleDriveView />}
+
             {activeTab === 'accounts' && currentUser.role === 'admin' && (
               <AdminAccountsView
                 currentUser={currentUser}
@@ -587,6 +688,7 @@ export default function App() {
           <PassDocumentModal
             docType={passModalDocType}
             currentUser={currentUser}
+            documents={documents}
             onClose={() => setPassModalDocType(null)}
             onCreated={handleDocumentCreated}
             onViewTracker={openDocInTracker}
@@ -639,7 +741,7 @@ export default function App() {
             fileUrl={previewModal.fileUrl}
             downloadUrl={previewModal.downloadUrl}
             mimeType={previewModal.mimeType}
-            onClose={() => setPreviewModal(null)}
+            onClose={closePreviewModal}
           />
         )}
       </div>

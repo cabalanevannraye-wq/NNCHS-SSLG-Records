@@ -1,6 +1,25 @@
-import React, { useState } from 'react';
-import { CheckCircle2, FileUp, Send, X } from 'lucide-react';
-import { api } from '../lib/api.ts';
+import React, { useEffect, useState } from 'react';
+import {
+  CheckCircle2,
+  FileText,
+  FileUp,
+  HardDrive,
+  RefreshCw,
+  Send,
+  X,
+} from 'lucide-react';
+import {
+  getGoogleDriveAccessToken,
+  subscribeDriveTokenChange,
+} from '../firebase.ts';
+import { firebaseService } from '../lib/firebaseService.ts';
+import {
+  downloadDriveFileAsFile,
+  DriveAuthError,
+  listDriveFiles,
+  uploadBlobToGoogleDrive,
+  type DriveFileItem,
+} from '../lib/googleDrive.ts';
 import {
   ACCOMPLISHMENT_CATEGORIES,
   CORE_VALUES,
@@ -11,10 +30,12 @@ import {
   type SSLGDocument,
   type UserAccount,
 } from '../types.ts';
+import { GoogleDriveConnectCard } from './GoogleDriveView.tsx';
 
 interface PassDocumentModalProps {
   docType: DocumentModuleType;
   currentUser: UserAccount;
+  documents: SSLGDocument[];
   onClose: () => void;
   onCreated: (doc: SSLGDocument) => void;
   onViewTracker: (doc: SSLGDocument) => void;
@@ -23,12 +44,20 @@ interface PassDocumentModalProps {
 export function PassDocumentModal({
   docType,
   currentUser,
+  documents,
   onClose,
   onCreated,
   onViewTracker,
 }: PassDocumentModalProps) {
   const categories =
     docType === 'accomplishment' ? ACCOMPLISHMENT_CATEGORIES : GENERAL_CATEGORIES;
+
+  const [sourceMode, setSourceMode] = useState<'device' | 'drive'>('device');
+  const [hasDriveToken, setHasDriveToken] = useState(() => Boolean(getGoogleDriveAccessToken()));
+  const [driveFiles, setDriveFiles] = useState<DriveFileItem[]>([]);
+  const [loadingDrive, setLoadingDrive] = useState(false);
+  const [selectedDriveFile, setSelectedDriveFile] = useState<DriveFileItem | null>(null);
+  const [backupToDrive, setBackupToDrive] = useState(true);
 
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
@@ -43,33 +72,89 @@ export function PassDocumentModal({
   const [error, setError] = useState('');
   const [createdDoc, setCreatedDoc] = useState<SSLGDocument | null>(null);
 
+  useEffect(() => {
+    return subscribeDriveTokenChange((tok) => setHasDriveToken(Boolean(tok)));
+  }, []);
+
+  const loadDrivePickerFiles = async () => {
+    setLoadingDrive(true);
+    setError('');
+    try {
+      const list = await listDriveFiles({ pageSize: 25 });
+      setDriveFiles(list);
+    } catch (err) {
+      if (err instanceof DriveAuthError) setHasDriveToken(false);
+      setError(err instanceof Error ? err.message : 'Unable to fetch Google Drive files.');
+    } finally {
+      setLoadingDrive(false);
+    }
+  };
+
+  useEffect(() => {
+    if (sourceMode === 'drive' && hasDriveToken) {
+      void loadDrivePickerFiles();
+    }
+  }, [sourceMode, hasDriveToken]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file) {
+    if (sourceMode === 'device' && !file) {
       setError('Please upload your prepared file (PDF, DOCX, JPG, or PNG).');
       return;
     }
+    if (sourceMode === 'drive' && !selectedDriveFile) {
+      setError('Please select a file from your Google Drive.');
+      return;
+    }
+
     setError('');
     setSubmitting(true);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('docType', docType);
-      formData.append('title', title.trim());
-      formData.append('category', category);
-      if (docType === 'accomplishment') {
-        formData.append('coreValue', coreValue);
+      let submissionFile = file;
+      let driveFileId: string | null = null;
+      let driveWebViewLink: string | null = null;
+
+      if (sourceMode === 'drive' && selectedDriveFile) {
+        submissionFile = await downloadDriveFileAsFile(selectedDriveFile);
+        driveFileId = selectedDriveFile.id;
+        driveWebViewLink = selectedDriveFile.webViewLink || null;
+      } else if (sourceMode === 'device' && file && backupToDrive && hasDriveToken) {
+        try {
+          const uploadedDrive = await uploadBlobToGoogleDrive({
+            blob: file,
+            fileName: file.name,
+            mimeType: file.type || 'application/octet-stream',
+          });
+          driveFileId = uploadedDrive.id;
+          driveWebViewLink = uploadedDrive.webViewLink || null;
+        } catch {
+          // Non-blocking Drive backup if token expired
+        }
       }
-      formData.append('documentDate', documentDate);
-      formData.append('purpose', purpose.trim());
-      if (currentUser.role !== 'organization' && organizationOverride.trim()) {
-        formData.append('organizationOverride', organizationOverride.trim());
+
+      if (!submissionFile) {
+        throw new Error('Selected file could not be read.');
       }
-      const created = await api.uploadDocument(formData);
+
+      const created = await firebaseService.createDocument(currentUser, documents, {
+        file: submissionFile,
+        docType,
+        title: title.trim(),
+        category,
+        coreValue: docType === 'accomplishment' ? coreValue : null,
+        documentDate,
+        purpose: purpose.trim(),
+        organizationOverride:
+          currentUser.role !== 'organization' && organizationOverride.trim()
+            ? organizationOverride.trim()
+            : undefined,
+        driveFileId,
+        driveWebViewLink,
+      });
       setCreatedDoc(created);
       onCreated(created);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to upload document');
+      setError(err instanceof Error ? err.message : 'Failed to submit document');
     } finally {
       setSubmitting(false);
     }
@@ -80,14 +165,14 @@ export function PassDocumentModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-xl border border-slate-200 max-w-xl w-full shadow-xl overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 max-w-xl w-full shadow-xl overflow-hidden my-6">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
           <div>
             <h3 className="text-lg font-bold text-slate-900">
               Stage 1: Submit {moduleLabel}
             </h3>
             <p className="text-xs text-slate-600 mt-0.5">
-              Upload your externally prepared file. Control Number &amp; Eartag unlock at Stage 3 after E-Sign.
+              Upload from your device or import directly from Google Drive. Control No. unlocks at Stage 3.
             </p>
           </div>
           <button
@@ -159,24 +244,127 @@ export function PassDocumentModal({
             )}
 
             <div>
-              <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                1. Upload Prepared File (PDF, DOCX, JPG, or PNG)
-              </label>
-              <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 hover:border-blue-700 rounded-lg p-5 bg-slate-50/80 cursor-pointer transition-colors">
-                <FileUp className="w-7 h-7 text-blue-800 mb-2" />
-                <span className="text-sm font-semibold text-slate-800 text-center">
-                  {file ? file.name : 'Click to browse prepared file'}
-                </span>
-                <span className="text-xs text-slate-500 mt-1">
-                  Prepare your document externally—no templates inside the app
-                </span>
-                <input
-                  type="file"
-                  accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,image/*"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="hidden"
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <label className="text-sm font-semibold text-slate-800">
+                  1. Attach Prepared File
+                </label>
+                <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setSourceMode('device')}
+                    className={`px-2.5 py-1 text-xs font-semibold rounded-md cursor-pointer inline-flex items-center gap-1 ${
+                      sourceMode === 'device'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <FileUp className="w-3.5 h-3.5" />
+                    <span>From Device</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSourceMode('drive')}
+                    className={`px-2.5 py-1 text-xs font-semibold rounded-md cursor-pointer inline-flex items-center gap-1 ${
+                      sourceMode === 'drive'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <HardDrive className="w-3.5 h-3.5" />
+                    <span>Google Drive</span>
+                  </button>
+                </div>
+              </div>
+
+              {sourceMode === 'device' ? (
+                <div className="space-y-2">
+                  <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 hover:border-blue-700 rounded-lg p-5 bg-slate-50/80 cursor-pointer transition-colors">
+                    <FileUp className="w-7 h-7 text-blue-800 mb-2" />
+                    <span className="text-sm font-semibold text-slate-800 text-center">
+                      {file ? file.name : 'Click to browse prepared file (PDF, DOCX, JPG, PNG)'}
+                    </span>
+                    <span className="text-xs text-slate-500 mt-1">
+                      Prepare your document externally—no templates inside the app
+                    </span>
+                    <input
+                      type="file"
+                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,image/*"
+                      onChange={(e) => setFile(e.target.files?.[0] || null)}
+                      className="hidden"
+                    />
+                  </label>
+                  {hasDriveToken && (
+                    <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={backupToDrive}
+                        onChange={(e) => setBackupToDrive(e.target.checked)}
+                        className="rounded border-slate-300"
+                      />
+                      <span>Also save a backup copy to Google Drive (SSLG Records folder)</span>
+                    </label>
+                  )}
+                </div>
+              ) : !hasDriveToken ? (
+                <GoogleDriveConnectCard
+                  compact
+                  onConnected={() => setHasDriveToken(true)}
+                  subtitle="Sign in with Google to choose a document directly from Google Drive."
                 />
-              </label>
+              ) : (
+                <div className="border border-slate-300 rounded-lg overflow-hidden bg-slate-50">
+                  <div className="px-3 py-2 bg-white border-b border-slate-200 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-700">
+                      Select a Google Drive file
+                    </span>
+                    <button
+                      type="button"
+                      disabled={loadingDrive}
+                      onClick={() => void loadDrivePickerFiles()}
+                      className="text-xs font-semibold text-blue-800 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${loadingDrive ? 'animate-spin' : ''}`} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="max-h-40 overflow-y-auto divide-y divide-slate-200 bg-white">
+                    {loadingDrive && driveFiles.length === 0 ? (
+                      <div className="p-4 text-center text-xs text-slate-500">
+                        Loading Google Drive files...
+                      </div>
+                    ) : driveFiles.length === 0 ? (
+                      <div className="p-4 text-center text-xs text-slate-500">
+                        No files found in your Google Drive.
+                      </div>
+                    ) : (
+                      driveFiles.map((df) => {
+                        const isPicked = selectedDriveFile?.id === df.id;
+                        return (
+                          <button
+                            key={df.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedDriveFile(df);
+                              if (!title.trim()) {
+                                setTitle(df.name.replace(/\.[^.]+$/, ''));
+                              }
+                            }}
+                            className={`w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 cursor-pointer ${
+                              isPicked ? 'bg-blue-50 text-blue-950 font-semibold' : 'hover:bg-slate-50'
+                            }`}
+                          >
+                            <span className="inline-flex items-center gap-2 min-w-0">
+                              <FileText className="w-3.5 h-3.5 text-blue-700 shrink-0" />
+                              <span className="truncate">{df.name}</span>
+                            </span>
+                            {isPicked && <span className="text-[11px] text-blue-800 shrink-0">Selected</span>}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>

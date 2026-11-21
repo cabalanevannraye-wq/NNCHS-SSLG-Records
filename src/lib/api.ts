@@ -1,37 +1,89 @@
-import type {
-  DirectoryEntry,
-  LeaderboardEntry,
-  SSLGDocument,
-  SystemSettings,
-  UserAccount,
-} from '../types.ts';
+import { onIdTokenChanged } from 'firebase/auth';
+import { auth } from '../firebase.ts';
+import type { SSLGDocument } from '../types.ts';
+import {
+  clientCompileBinderPdfBlob,
+  clientCompileYearEndPdfBlob,
+  clientStampSignaturePdf,
+} from './clientPdf.ts';
+import {
+  downloadDriveFileBlob,
+  isGoogleDriveConnected,
+  uploadBlobToGoogleDrive,
+} from './googleDrive.ts';
 
-const TOKEN_STORAGE_KEY = 'sslg_auth_token';
+let latestIdToken: string | null = null;
 
-export function getStoredToken(): string | null {
-  return localStorage.getItem(TOKEN_STORAGE_KEY);
+onIdTokenChanged(auth, async (user) => {
+  if (!user) {
+    latestIdToken = null;
+    return;
+  }
+  try {
+    latestIdToken = await user.getIdToken();
+  } catch {
+    latestIdToken = null;
+  }
+});
+
+const rawApiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '';
+export const API_BASE_URL = rawApiBase.trim().replace(/\/+$/, '');
+
+export function buildApiUrl(path: string): string {
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return API_BASE_URL ? `${API_BASE_URL}${normalized}` : normalized;
 }
 
-export function setStoredToken(token: string | null) {
-  if (token) {
-    localStorage.setItem(TOKEN_STORAGE_KEY, token);
-  } else {
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
+export async function getFreshIdToken(): Promise<string> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('Authentication required. Please sign in with Google.');
+  }
+  const token = await user.getIdToken();
+  latestIdToken = token;
+  return token;
+}
+
+export function getCachedIdToken(): string {
+  return latestIdToken || '';
+}
+
+function isStaticHostFallbackStatus(status: number, contentType: string | null): boolean {
+  if (status === 405 || status === 502 || status === 503 || status === 504) {
+    return true;
+  }
+  if (status === 404 && contentType && !contentType.includes('application/json')) {
+    return true;
+  }
+  return false;
+}
+
+class StaticHostFallbackError extends Error {
+  constructor(status: number) {
+    super(`Backend route unavailable (${status})`);
+    this.name = 'StaticHostFallbackError';
   }
 }
 
-async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const token = getStoredToken();
+async function authedFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const token = await getFreshIdToken();
   const headers = new Headers(options.headers || {});
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
+  headers.set('Authorization', `Bearer ${token}`);
   if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const res = await fetch(url, { ...options, headers });
+  let res: Response;
+  try {
+    res = await fetch(buildApiUrl(url), { ...options, headers });
+  } catch {
+    throw new StaticHostFallbackError(0);
+  }
+
   if (!res.ok) {
+    if (isStaticHostFallbackStatus(res.status, res.headers.get('content-type'))) {
+      throw new StaticHostFallbackError(res.status);
+    }
     let message = `Request failed (${res.status})`;
     try {
       const data = (await res.json()) as { error?: string };
@@ -41,150 +93,207 @@ async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
     }
     throw new Error(message);
   }
-  return res.json() as Promise<T>;
+  return res;
+}
+
+export interface UploadedFileMeta {
+  filePath: string;
+  fileName: string;
+  fileMimeType: string;
+  fileSize: number;
+  driveFileId?: string | null;
+  driveWebViewLink?: string | null;
 }
 
 export const api = {
-  login: (email: string, password: string) =>
-    apiFetch<{ token: string; user: UserAccount; settings: SystemSettings }>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    }),
+  uploadFile: async (file: File): Promise<UploadedFileMeta> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await authedFetch('/api/files/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      return (await res.json()) as UploadedFileMeta;
+    } catch (err) {
+      if (!(err instanceof StaticHostFallbackError)) {
+        throw err;
+      }
+      if (isGoogleDriveConnected()) {
+        const uploadedDrive = await uploadBlobToGoogleDrive({
+          blob: file,
+          fileName: file.name,
+          mimeType: file.type || 'application/octet-stream',
+        });
+        return {
+          filePath: `drive:${uploadedDrive.id}`,
+          fileName: file.name,
+          fileMimeType: file.type || 'application/octet-stream',
+          fileSize: file.size,
+          driveFileId: uploadedDrive.id,
+          driveWebViewLink: uploadedDrive.webViewLink || null,
+        };
+      }
+      return {
+        filePath: `local:${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
+        fileName: file.name,
+        fileMimeType: file.type || 'application/octet-stream',
+        fileSize: file.size,
+        driveFileId: null,
+        driveWebViewLink: null,
+      };
+    }
+  },
 
-  me: () => apiFetch<{ user: UserAccount; settings: SystemSettings }>('/api/auth/me'),
+  stampSignature: async (payload: {
+    doc: SSLGDocument;
+    controlNumber: string;
+    signatureDataUrl: string;
+    signerName: string;
+    signerPosition: string;
+    signedAt: string;
+  }): Promise<{ signedFilePath: string | null }> => {
+    try {
+      const res = await authedFetch('/api/files/stamp-signature', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      return (await res.json()) as { signedFilePath: string | null };
+    } catch (err) {
+      if (!(err instanceof StaticHostFallbackError)) {
+        throw err;
+      }
+      let sourceBytes: Uint8Array | undefined;
+      const driveId =
+        payload.doc.driveFileId ||
+        (payload.doc.filePath.startsWith('drive:') ? payload.doc.filePath.slice(6) : null);
+      if (driveId && isGoogleDriveConnected()) {
+        try {
+          const { blob } = await downloadDriveFileBlob(driveId, payload.doc.fileMimeType);
+          sourceBytes = new Uint8Array(await blob.arrayBuffer());
+        } catch {
+          sourceBytes = undefined;
+        }
+      }
 
-  updateMyAvatar: (avatarDataUrl: string | null) =>
-    apiFetch<UserAccount>('/api/auth/me/avatar', {
-      method: 'PATCH',
-      body: JSON.stringify({ avatarDataUrl }),
-    }),
+      const stampedBytes = await clientStampSignaturePdf({
+        ...payload,
+        sourceFileBytes: sourceBytes,
+      });
 
-  getLeaderboard: () => apiFetch<LeaderboardEntry[]>('/api/leaderboard'),
+      if (isGoogleDriveConnected()) {
+        const safeCtrl = payload.controlNumber.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const uploaded = await uploadBlobToGoogleDrive({
+          blob: new Blob([Uint8Array.from(stampedBytes)], { type: 'application/pdf' }),
+          fileName: `SIGNED_${safeCtrl}_${Date.now()}.pdf`,
+          mimeType: 'application/pdf',
+        });
+        return { signedFilePath: `drive:${uploaded.id}` };
+      }
 
-  getDirectory: () => apiFetch<DirectoryEntry[]>('/api/directory'),
+      return { signedFilePath: payload.doc.signedFilePath ?? null };
+    }
+  },
 
-  getSettings: () => apiFetch<SystemSettings>('/api/settings'),
+  deleteFiles: async (paths: Array<string | null | undefined>): Promise<void> => {
+    const filtered = paths.filter(
+      (p): p is string =>
+        typeof p === 'string' && p.length > 0 && !p.startsWith('drive:') && !p.startsWith('local:')
+    );
+    if (filtered.length === 0) return;
+    try {
+      await authedFetch('/api/files/delete', {
+        method: 'POST',
+        body: JSON.stringify({ paths: filtered }),
+      });
+    } catch (err) {
+      if (!(err instanceof StaticHostFallbackError)) {
+        throw err;
+      }
+    }
+  },
 
-  updateSettings: (payload: Partial<SystemSettings>) =>
-    apiFetch<SystemSettings>('/api/settings', {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    }),
+  compileBinderPdfBlob: async (payload: {
+    documents: SSLGDocument[];
+    organizationHeader: string;
+    schoolYear: string;
+    periodLabel: string;
+    categoryLabel: string;
+  }): Promise<Blob> => {
+    try {
+      const res = await authedFetch('/api/pdf/compile-binder', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      return res.blob();
+    } catch (err) {
+      if (!(err instanceof StaticHostFallbackError)) {
+        throw err;
+      }
+      return clientCompileBinderPdfBlob(payload);
+    }
+  },
 
-  getUsers: () => apiFetch<UserAccount[]>('/api/users'),
-
-  createUser: (payload: {
-    email: string;
-    password: string;
-    fullName: string;
-    role: 'admin' | 'officer' | 'organization';
-    positionOrClub: string;
-    department: string;
-  }) =>
-    apiFetch<UserAccount>('/api/users', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
-  updateUser: (id: string, payload: Partial<UserAccount> & { password?: string }) =>
-    apiFetch<UserAccount>(`/api/users/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    }),
-
-  deleteUser: (id: string) =>
-    apiFetch<{ deleted: boolean; id: string }>(`/api/users/${id}`, {
-      method: 'DELETE',
-    }),
-
-  getDocuments: () => apiFetch<SSLGDocument[]>('/api/documents'),
-
-  uploadDocument: (formData: FormData) =>
-    apiFetch<SSLGDocument>('/api/documents', {
-      method: 'POST',
-      body: formData,
-    }),
-
-  deleteDocument: (id: string) =>
-    apiFetch<{ deleted: boolean; id: string }>(`/api/documents/${id}`, {
-      method: 'DELETE',
-    }),
-
-  receiveForEsign: (id: string) =>
-    apiFetch<SSLGDocument>(`/api/documents/${id}/receive-esign`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    }),
-
-  esignDocument: (id: string, payload: { signatureDataUrl: string; remarks?: string }) =>
-    apiFetch<SSLGDocument>(`/api/documents/${id}/esign`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
-  updateControlNumber: (id: string, controlNumber: string) =>
-    apiFetch<SSLGDocument>(`/api/documents/${id}/control-number`, {
-      method: 'PATCH',
-      body: JSON.stringify({ controlNumber }),
-    }),
-
-  markDocumentPrinted: (id: string, remarks?: string) =>
-    apiFetch<SSLGDocument>(`/api/documents/${id}/mark-printed`, {
-      method: 'POST',
-      body: JSON.stringify({ remarks }),
-    }),
-
-  uploadHardcopyScanForDoc: (id: string, formData: FormData) =>
-    apiFetch<SSLGDocument>(`/api/documents/${id}/hardcopy-scan`, {
-      method: 'POST',
-      body: formData,
-    }),
+  compileYearEndPdfBlob: async (payload: {
+    documents: SSLGDocument[];
+    organizationHeader: string;
+    schoolYear: string;
+  }): Promise<Blob> => {
+    try {
+      const res = await authedFetch('/api/pdf/compile-year-end', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      return res.blob();
+    } catch (err) {
+      if (!(err instanceof StaticHostFallbackError)) {
+        throw err;
+      }
+      return clientCompileYearEndPdfBlob(payload);
+    }
+  },
 };
 
 export function getDocumentFileUrl(
-  docId: string,
+  doc: SSLGDocument,
   options: { download?: boolean; original?: boolean } = {}
 ): string {
-  const token = getStoredToken() || '';
-  const params = new URLSearchParams({ token });
-  if (options.download) params.set('download', 'true');
-  if (options.original) params.set('original', 'true');
-  return `/api/documents/${docId}/file?${params.toString()}`;
-}
-
-export function getHardcopyFileUrl(docId: string, download = false): string {
-  const token = getStoredToken() || '';
-  const params = new URLSearchParams({ token });
-  if (download) params.set('download', 'true');
-  return `/api/documents/${docId}/hardcopy-file?${params.toString()}`;
-}
-
-export function getCompilationPdfUrl(params: {
-  periodType: 'monthly' | 'quarterly' | 'annual';
-  year: string;
-  month: string;
-  quarter: string;
-  category: string;
-  coreValue?: string;
-  docType: string;
-}): string {
-  const token = getStoredToken() || '';
-  const q = new URLSearchParams({
-    token,
-    periodType: params.periodType,
-    year: params.year,
-    month: params.month,
-    quarter: params.quarter,
-    category: params.category,
-    docType: params.docType,
-  });
-  if (params.coreValue && params.coreValue !== 'ALL') {
-    q.set('coreValue', params.coreValue);
+  const rel = !options.original && doc.signedFilePath ? doc.signedFilePath : doc.filePath;
+  if (rel.startsWith('drive:')) {
+    const id = rel.slice(6);
+    return options.download
+      ? `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`
+      : doc.driveWebViewLink || `https://drive.google.com/file/d/${encodeURIComponent(id)}/view`;
   }
-  return `/api/compilations/pdf?${q.toString()}`;
+  if (doc.driveWebViewLink && rel.startsWith('local:')) {
+    return doc.driveWebViewLink;
+  }
+  const name =
+    !options.original && doc.signedFilePath
+      ? `${doc.controlNumber || doc.id}_Signed.pdf`
+      : doc.fileName;
+  const params = new URLSearchParams({
+    token: getCachedIdToken(),
+    name,
+  });
+  if (options.download) params.set('download', 'true');
+  return buildApiUrl(`/api/files/${encodeURIComponent(rel)}?${params.toString()}`);
 }
 
-export function getYearEndArchivePdfUrl(): string {
-  const token = getStoredToken() || '';
-  return `/api/hardcopy-archive/compile-pdf?token=${encodeURIComponent(token)}`;
+export function getHardcopyFileUrl(doc: SSLGDocument, download = false): string {
+  if (!doc.hardcopyScan?.filePath) return '';
+  const rel = doc.hardcopyScan.filePath;
+  if (rel.startsWith('drive:')) {
+    const id = rel.slice(6);
+    return download
+      ? `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`
+      : `https://drive.google.com/file/d/${encodeURIComponent(id)}/view`;
+  }
+  const name = `${doc.controlNumber || doc.id}_HardcopyScan_${doc.hardcopyScan.fileName}`;
+  const params = new URLSearchParams({
+    token: getCachedIdToken(),
+    name,
+  });
+  if (download) params.set('download', 'true');
+  return buildApiUrl(`/api/files/${encodeURIComponent(rel)}?${params.toString()}`);
 }

@@ -9,7 +9,8 @@ import {
   Tag,
   X,
 } from 'lucide-react';
-import { api, getDocumentFileUrl } from '../lib/api.ts';
+import { getDocumentFileUrl } from '../lib/api.ts';
+import { firebaseService } from '../lib/firebaseService.ts';
 import {
   ALL_CATEGORIES,
   CORE_VALUES,
@@ -93,9 +94,15 @@ export function ControlRegisterView({
   };
 
   const saveControlNumber = async (docId: string) => {
+    const targetDoc = documents.find((d) => d.id === docId);
+    if (!targetDoc) return;
     setEditError('');
     try {
-      const updated = await api.updateControlNumber(docId, editControlValue);
+      const updated = await firebaseService.updateControlNumber(
+        targetDoc,
+        editControlValue,
+        documents
+      );
       onDocumentUpdated(updated);
       setEditingId(null);
     } catch (err) {
@@ -349,7 +356,7 @@ export function ControlRegisterView({
                           <Eye className="w-4 h-4" />
                         </button>
                         <a
-                          href={getDocumentFileUrl(doc.id, { download: true })}
+                          href={getDocumentFileUrl(doc, { download: true })}
                           download
                           title="Download File"
                           className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md"

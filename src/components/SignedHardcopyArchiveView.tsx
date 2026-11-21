@@ -3,13 +3,18 @@ import {
   BookOpenCheck,
   CheckCircle2,
   Download,
+  ExternalLink,
   Eye,
   FileUp,
+  HardDrive,
   Printer,
   ScanLine,
   Tag,
 } from 'lucide-react';
-import { api, getHardcopyFileUrl, getYearEndArchivePdfUrl } from '../lib/api.ts';
+import { connectGoogleDriveWithPopup, getGoogleDriveAccessToken } from '../firebase.ts';
+import { api, getHardcopyFileUrl } from '../lib/api.ts';
+import { firebaseService } from '../lib/firebaseService.ts';
+import { uploadBlobToGoogleDrive } from '../lib/googleDrive.ts';
 import type { SSLGDocument, SystemSettings, UserAccount } from '../types.ts';
 import { formatDateTime } from './SSLGCrest.tsx';
 
@@ -61,13 +66,89 @@ export function SignedHardcopyArchiveView({
       .sort((a, b) => (a.controlNumber || 'ZZZ').localeCompare(b.controlNumber || 'ZZZ'));
   }, [documents, moduleFilter]);
 
+  const [compilingYearEnd, setCompilingYearEnd] = useState(false);
+  const [savingToDrive, setSavingToDrive] = useState(false);
+  const [driveArchiveLink, setDriveArchiveLink] = useState<string | null>(null);
   const canUpload = currentUser.role === 'admin' || currentUser.role === 'officer';
-  const yearEndPdfUrl = getYearEndArchivePdfUrl();
+
+  const handleOpenYearEnd = async () => {
+    setCompilingYearEnd(true);
+    try {
+      const blob = await api.compileYearEndPdfBlob({
+        documents,
+        organizationHeader: settings.organizationHeader,
+        schoolYear: settings.schoolYear,
+      });
+      const blobUrl = URL.createObjectURL(blob);
+      onOpenYearEndPdf(
+        blobUrl,
+        `Full School Year Hardcopy Archive (${settings.schoolYear})`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to compile Year-End PDF');
+    } finally {
+      setCompilingYearEnd(false);
+    }
+  };
+
+  const handleDownloadYearEnd = async () => {
+    setCompilingYearEnd(true);
+    try {
+      const blob = await api.compileYearEndPdfBlob({
+        documents,
+        organizationHeader: settings.organizationHeader,
+        schoolYear: settings.schoolYear,
+      });
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `SSLG_YearEnd_Hardcopy_Archive_${settings.schoolYear}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download Year-End PDF');
+    } finally {
+      setCompilingYearEnd(false);
+    }
+  };
+
+  const handleSaveYearEndToDrive = async () => {
+    setError('');
+    setSuccessMsg('');
+    setDriveArchiveLink(null);
+    setSavingToDrive(true);
+    try {
+      if (!getGoogleDriveAccessToken()) {
+        await connectGoogleDriveWithPopup();
+      }
+      const blob = await api.compileYearEndPdfBlob({
+        documents,
+        organizationHeader: settings.organizationHeader,
+        schoolYear: settings.schoolYear,
+      });
+      const uploaded = await uploadBlobToGoogleDrive({
+        blob,
+        fileName: `SSLG_YearEnd_Hardcopy_Archive_${settings.schoolYear}.pdf`,
+        mimeType: 'application/pdf',
+      });
+      const link =
+        uploaded.webViewLink || `https://drive.google.com/file/d/${encodeURIComponent(uploaded.id)}/view`;
+      setDriveArchiveLink(link);
+      setSuccessMsg(`Year-End Hardcopy Archive (${settings.schoolYear}) saved to Google Drive.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save Year-End archive to Google Drive');
+    } finally {
+      setSavingToDrive(false);
+    }
+  };
 
   const handleStage5Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const docId = targetDocId || readyForStage5[0]?.id;
-    if (!docId) {
+    const targetDoc = readyForStage5.find((d) => d.id === docId);
+    if (!targetDoc) {
       setError('No Stage 3 or Stage 4 documents waiting for final scan upload.');
       return;
     }
@@ -79,11 +160,16 @@ export function SignedHardcopyArchiveView({
     setSuccessMsg('');
     setSubmitting(true);
     try {
-      const fd = new FormData();
-      fd.append('file', scanFile);
-      fd.append('wetInkSignatories', wetInkSignatories);
-      fd.append('notes', notes);
-      const updated = await api.uploadHardcopyScanForDoc(docId, fd);
+      const updated = await firebaseService.uploadHardcopyScanForDoc(
+        targetDoc,
+        currentUser,
+        documents,
+        {
+          file: scanFile,
+          wetInkSignatories,
+          notes,
+        }
+      );
       onDocumentUpdated(updated);
       setScanFile(null);
       setNotes('');
@@ -129,24 +215,46 @@ export function SignedHardcopyArchiveView({
           )}
           <button
             type="button"
-            onClick={() =>
-              onOpenYearEndPdf(
-                yearEndPdfUrl,
-                `Full School Year Hardcopy Archive (${settings.schoolYear})`
-              )
-            }
-            className="px-5 py-3 text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg inline-flex items-center gap-2 cursor-pointer whitespace-nowrap"
+            disabled={compilingYearEnd || savingToDrive}
+            onClick={handleSaveYearEndToDrive}
+            className="px-4 py-3 text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-lg inline-flex items-center gap-2 disabled:opacity-60 cursor-pointer whitespace-nowrap"
+          >
+            <HardDrive className="w-4 h-4 text-amber-400" />
+            <span>{savingToDrive ? 'Saving to Drive...' : 'Save Archive to Drive'}</span>
+          </button>
+          <button
+            type="button"
+            disabled={compilingYearEnd}
+            onClick={handleOpenYearEnd}
+            className="px-5 py-3 text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg inline-flex items-center gap-2 disabled:opacity-60 cursor-pointer whitespace-nowrap"
           >
             <Printer className="w-4 h-4" />
-            <span>Compile &amp; Print Full School Year Archive (1-Click)</span>
+            <span>
+              {compilingYearEnd
+                ? 'Compiling Archive Book...'
+                : 'Compile & Print Full School Year Archive (1-Click)'}
+            </span>
           </button>
         </div>
       </div>
 
       {successMsg && (
-        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-sm font-medium text-emerald-900 flex items-center gap-2.5">
-          <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0" />
-          <span>{successMsg}</span>
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-sm font-medium text-emerald-900 flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0" />
+            <span>{successMsg}</span>
+          </div>
+          {driveArchiveLink && (
+            <a
+              href={driveArchiveLink}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-bold text-emerald-800 hover:underline inline-flex items-center gap-1 shrink-0"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Open in Drive</span>
+            </a>
+          )}
         </div>
       )}
 
@@ -282,14 +390,15 @@ export function SignedHardcopyArchiveView({
             </div>
           </div>
 
-          <a
-            href={yearEndPdfUrl}
-            download={`SSLG_YearEnd_Hardcopy_Archive_${settings.schoolYear}.pdf`}
-            className="text-xs font-semibold text-blue-800 hover:underline inline-flex items-center gap-1.5"
+          <button
+            type="button"
+            disabled={compilingYearEnd}
+            onClick={handleDownloadYearEnd}
+            className="text-xs font-semibold text-blue-800 hover:underline inline-flex items-center gap-1.5 disabled:opacity-60 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Download Full Year-End PDF Book</span>
-          </a>
+            <span>{compilingYearEnd ? 'Compiling...' : 'Download Full Year-End PDF Book'}</span>
+          </button>
         </div>
 
         <div className="overflow-x-auto">
@@ -361,7 +470,7 @@ export function SignedHardcopyArchiveView({
                           <span>Eartag</span>
                         </button>
                         <a
-                          href={getHardcopyFileUrl(doc.id, true)}
+                          href={getHardcopyFileUrl(doc, true)}
                           download
                           title="Download Scan"
                           className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md"

@@ -1,0 +1,381 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- HARDENED GLOBAL PRIMITIVES ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerified() && request.auth.token.email == 'cabalan.evann.raye@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerified() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isActiveMember() {
+      return isBootstrappedAdmin() || (
+        isVerified() &&
+        exists(/databases/$(database)/documents/user_private/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/user_private/$(request.auth.uid)).data.active == true
+      );
+    }
+
+    function isOfficer() {
+      return isVerified() &&
+        exists(/databases/$(database)/documents/user_private/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/user_private/$(request.auth.uid)).data.active == true &&
+        get(/databases/$(database)/documents/user_private/$(request.auth.uid)).data.role == 'officer';
+    }
+
+    function isOfficerOrAdmin() {
+      return isAdmin() || isOfficer();
+    }
+
+    function authInviteId() {
+      return request.auth.token.email.lower().replace('[^a-z0-9]', '_');
+    }
+
+    function hasValidInviteForRole(roleVal) {
+      return isVerified() &&
+        exists(/databases/$(database)/documents/invites/$(authInviteId())) &&
+        get(/databases/$(database)/documents/invites/$(authInviteId())).data.active == true &&
+        get(/databases/$(database)/documents/invites/$(authInviteId())).data.email == request.auth.token.email.lower() &&
+        get(/databases/$(database)/documents/invites/$(authInviteId())).data.role == roleVal;
+    }
+
+    // --- VALIDATION BLUEPRINTS ---
+    function isValidAdminDoc(data) {
+      return data.keys().hasAll(['uid', 'grantedBy', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'grantedBy', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.grantedBy is string && data.grantedBy.size() >= 1 && data.grantedBy.size() <= 128 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidInvite(data) {
+      return data.keys().hasAll(['email', 'fullName', 'role', 'positionOrClub', 'department', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['email', 'fullName', 'role', 'positionOrClub', 'department', 'active', 'claimedUid', 'createdAt', 'updatedAt']) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
+        data.role in ['admin', 'officer', 'organization'] &&
+        data.positionOrClub is string && data.positionOrClub.size() >= 1 && data.positionOrClub.size() <= 120 &&
+        data.department is string && data.department.size() >= 1 && data.department.size() <= 120 &&
+        data.active is bool &&
+        (!('claimedUid' in data) || data.claimedUid == null || isValidId(data.claimedUid)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserDirectory(data) {
+      return data.keys().hasAll(['uid', 'fullName', 'role', 'positionOrClub', 'department', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'fullName', 'role', 'positionOrClub', 'department', 'avatarDataUrl', 'active', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
+        data.role in ['admin', 'officer', 'organization'] &&
+        data.positionOrClub is string && data.positionOrClub.size() >= 1 && data.positionOrClub.size() <= 120 &&
+        data.department is string && data.department.size() >= 1 && data.department.size() <= 120 &&
+        (!('avatarDataUrl' in data) || data.avatarDataUrl == null || (data.avatarDataUrl is string && data.avatarDataUrl.size() <= 300000)) &&
+        data.active is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivate(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'active', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.role in ['admin', 'officer', 'organization'] &&
+        data.active is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidContributorStat(data) {
+      return data.keys().hasAll(['uid', 'isPublicStat', 'totalPassed', 'ongoingCount', 'completedCount', 'generalCount', 'accomplishmentCount', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'isPublicStat', 'totalPassed', 'ongoingCount', 'completedCount', 'generalCount', 'accomplishmentCount', 'latestDocumentDate', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.isPublicStat == true &&
+        data.totalPassed is number && data.totalPassed >= 0 &&
+        data.ongoingCount is number && data.ongoingCount >= 0 &&
+        data.completedCount is number && data.completedCount >= 0 &&
+        data.generalCount is number && data.generalCount >= 0 &&
+        data.accomplishmentCount is number && data.accomplishmentCount >= 0 &&
+        (!('latestDocumentDate' in data) || data.latestDocumentDate == null || (data.latestDocumentDate is string && data.latestDocumentDate.size() <= 20)) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll(['organizationHeader', 'schoolYear', 'generalPrefix', 'generalNextSequence', 'accomplishmentPrefix', 'accomplishmentNextSequence', 'updatedAt']) &&
+        data.keys().hasOnly(['organizationHeader', 'schoolYear', 'generalPrefix', 'generalNextSequence', 'accomplishmentPrefix', 'accomplishmentNextSequence', 'updatedAt']) &&
+        data.organizationHeader is string && data.organizationHeader.size() >= 1 && data.organizationHeader.size() <= 160 &&
+        data.schoolYear is string && data.schoolYear.size() >= 4 && data.schoolYear.size() <= 30 &&
+        data.generalPrefix is string && data.generalPrefix.size() >= 2 && data.generalPrefix.size() <= 30 &&
+        data.generalNextSequence is int && data.generalNextSequence >= 1 &&
+        data.accomplishmentPrefix is string && data.accomplishmentPrefix.size() >= 2 && data.accomplishmentPrefix.size() <= 30 &&
+        data.accomplishmentNextSequence is int && data.accomplishmentNextSequence >= 1 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDocumentRecord(data) {
+      return data.keys().hasAll([
+          'id', 'docType', 'title', 'category', 'documentDate', 'purpose',
+          'submittedByUserId', 'authorName', 'organizationName',
+          'fileName', 'fileMimeType', 'filePath', 'fileSize',
+          'currentStage', 'stageLabel', 'reviewerUids',
+          'transmittalHistory', 'signatures', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'docType', 'controlNumber', 'title', 'category', 'coreValue',
+          'documentDate', 'purpose', 'submittedByUserId', 'authorName', 'organizationName',
+          'fileName', 'fileMimeType', 'filePath', 'signedFilePath', 'driveFileId', 'driveWebViewLink', 'fileSize',
+          'currentStage', 'stageLabel', 'printedAt', 'printedByName',
+          'reviewerUids', 'transmittalHistory', 'signatures', 'hardcopyScan',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.docType in ['general', 'accomplishment'] &&
+        (!('controlNumber' in data) || data.controlNumber == null || (data.controlNumber is string && data.controlNumber.size() >= 1 && data.controlNumber.size() <= 60)) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 240 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 100 &&
+        (!('coreValue' in data) || data.coreValue == null || data.coreValue in ['Maka-Diyos', 'Maka-Tao', 'Maka-Kalikasan', 'Makabansa']) &&
+        data.documentDate is string && data.documentDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.purpose is string && data.purpose.size() >= 1 && data.purpose.size() <= 1200 &&
+        isValidId(data.submittedByUserId) &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
+        data.organizationName is string && data.organizationName.size() >= 1 && data.organizationName.size() <= 120 &&
+        data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 260 &&
+        data.fileMimeType is string && data.fileMimeType.size() >= 1 && data.fileMimeType.size() <= 120 &&
+        data.filePath is string && data.filePath.size() >= 1 && data.filePath.size() <= 300 &&
+        (!('signedFilePath' in data) || data.signedFilePath == null || (data.signedFilePath is string && data.signedFilePath.size() <= 300)) &&
+        (!('driveFileId' in data) || data.driveFileId == null || (data.driveFileId is string && data.driveFileId.size() <= 200)) &&
+        (!('driveWebViewLink' in data) || data.driveWebViewLink == null || (data.driveWebViewLink is string && data.driveWebViewLink.size() <= 500)) &&
+        data.fileSize is number && data.fileSize >= 0 &&
+        data.currentStage is int && data.currentStage >= 1 && data.currentStage <= 5 &&
+        data.stageLabel is string && data.stageLabel.size() >= 1 && data.stageLabel.size() <= 80 &&
+        (!('printedAt' in data) || data.printedAt == null || (data.printedAt is string && data.printedAt.size() <= 40)) &&
+        (!('printedByName' in data) || data.printedByName == null || (data.printedByName is string && data.printedByName.size() <= 120)) &&
+        data.reviewerUids is list && data.reviewerUids.size() <= 25 && (data.reviewerUids.size() == 0 || data.reviewerUids[0] is string) &&
+        data.transmittalHistory is list && data.transmittalHistory.size() >= 1 && data.transmittalHistory.size() <= 25 && data.transmittalHistory[0] is map &&
+        data.signatures is list && data.signatures.size() <= 15 && (data.signatures.size() == 0 || data.signatures[0] is map) &&
+        (!('hardcopyScan' in data) || data.hardcopyScan == null || data.hardcopyScan is map) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // --- COLLECTION RULES ---
+
+    // Connection check document (startup verification only)
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
+    match /admins/{uid} {
+      allow get: if isVerified() && isValidId(uid) && (uid == request.auth.uid || isAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isVerified() && isValidId(uid) &&
+        isValidAdminDoc(incoming()) &&
+        incoming().uid == uid &&
+        incoming().createdAt == request.time &&
+        (isAdmin() || (isBootstrappedAdmin() && uid == request.auth.uid));
+      allow update: if false;
+      allow delete: if isVerified() && isValidId(uid) && isAdmin() && uid != request.auth.uid;
+    }
+
+    match /invites/{inviteId} {
+      allow get: if isVerified() && isValidId(inviteId) && (
+        isAdmin() || resource == null || existing().email == request.auth.token.email.lower()
+      );
+      allow list: if isVerified() && (
+        isBootstrappedAdmin() || resource.data.email == request.auth.token.email.lower()
+      );
+      allow create: if isVerified() && isValidId(inviteId) &&
+        isValidInvite(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isVerified() && isValidId(inviteId) &&
+        isValidInvite(incoming()) &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'role', 'positionOrClub', 'department', 'active', 'claimedUid', 'updatedAt'])) ||
+          (existing().email == request.auth.token.email.lower() && existing().active == true && incoming().claimedUid == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['claimedUid', 'updatedAt']))
+        );
+      allow delete: if isVerified() && isValidId(inviteId) && isAdmin();
+    }
+
+    match /user_directory/{uid} {
+      allow get: if isVerified() && isValidId(uid) && (
+        uid == request.auth.uid || isAdmin() || (isActiveMember() && existing().active == true)
+      );
+      allow list: if isVerified() && (
+        isBootstrappedAdmin() || resource.data.uid == request.auth.uid || resource.data.active == true
+      );
+      allow create: if isVerified() && isValidId(uid) &&
+        isValidUserDirectory(incoming()) &&
+        incoming().uid == uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (uid == request.auth.uid && (
+            (isBootstrappedAdmin() && incoming().role == 'admin') ||
+            hasValidInviteForRole(incoming().role)
+          ))
+        );
+      allow update: if isVerified() && isValidId(uid) &&
+        isValidUserDirectory(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'role', 'positionOrClub', 'department', 'avatarDataUrl', 'active', 'updatedAt'])) ||
+          (uid == request.auth.uid && existing().active == true && incoming().diff(existing()).affectedKeys().hasOnly(['avatarDataUrl', 'fullName', 'updatedAt']))
+        );
+      allow delete: if isVerified() && isValidId(uid) && isAdmin() && uid != request.auth.uid;
+    }
+
+    match /user_private/{uid} {
+      allow get: if isVerified() && isValidId(uid) && (uid == request.auth.uid || isAdmin());
+      allow list: if isVerified() && (isBootstrappedAdmin() || resource.data.uid == request.auth.uid);
+      allow create: if isVerified() && isValidId(uid) &&
+        isValidUserPrivate(incoming()) &&
+        incoming().uid == uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (uid == request.auth.uid && incoming().email == request.auth.token.email.lower() && (
+            (isBootstrappedAdmin() && incoming().role == 'admin') ||
+            hasValidInviteForRole(incoming().role)
+          ))
+        );
+      allow update: if isVerified() && isValidId(uid) &&
+        isValidUserPrivate(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        isAdmin() &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'role', 'active', 'updatedAt']);
+      allow delete: if isVerified() && isValidId(uid) && isAdmin() && uid != request.auth.uid;
+    }
+
+    match /contributor_stats/{uid} {
+      allow get: if isVerified() && isValidId(uid) && (uid == request.auth.uid || isActiveMember());
+      allow list: if isVerified() && (isBootstrappedAdmin() || resource.data.isPublicStat == true);
+      allow create: if isVerified() && isValidId(uid) &&
+        isValidContributorStat(incoming()) &&
+        incoming().uid == uid &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || isOfficer() || (uid == request.auth.uid && isActiveMember()));
+      allow update: if isVerified() && isValidId(uid) &&
+        isValidContributorStat(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || isOfficer() || (uid == request.auth.uid && isActiveMember())) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['totalPassed', 'ongoingCount', 'completedCount', 'generalCount', 'accomplishmentCount', 'latestDocumentDate', 'updatedAt']);
+      allow delete: if isVerified() && isValidId(uid) && isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow get: if isVerified() && isValidId(settingId) && isActiveMember();
+      allow list: if false;
+      allow create: if isVerified() && settingId == 'global' &&
+        isValidSettings(incoming()) &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isVerified() && settingId == 'global' &&
+        isValidSettings(incoming()) &&
+        incoming().updatedAt == request.time && (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['organizationHeader', 'schoolYear', 'generalPrefix', 'generalNextSequence', 'accomplishmentPrefix', 'accomplishmentNextSequence', 'updatedAt'])) ||
+          (isOfficerOrAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['generalNextSequence', 'accomplishmentNextSequence', 'updatedAt']))
+        );
+      allow delete: if false;
+    }
+
+    match /documents/{docId} {
+      allow get: if isVerified() && isValidId(docId) && (
+        isAdmin() ||
+        existing().submittedByUserId == request.auth.uid ||
+        (isOfficer() && request.auth.uid in existing().reviewerUids)
+      );
+      allow list: if isVerified() && (
+        isBootstrappedAdmin() ||
+        resource.data.submittedByUserId == request.auth.uid ||
+        request.auth.uid in resource.data.reviewerUids
+      );
+      allow create: if isVerified() && isValidId(docId) &&
+        isValidDocumentRecord(incoming()) &&
+        incoming().id == docId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isActiveMember() && incoming().submittedByUserId == request.auth.uid && incoming().currentStage == 1 && incoming().controlNumber == null)
+        );
+      allow update: if isVerified() && isValidId(docId) &&
+        isValidDocumentRecord(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().docType == existing().docType &&
+        incoming().submittedByUserId == existing().submittedByUserId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Admin override
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'controlNumber', 'title', 'category', 'coreValue', 'documentDate', 'purpose',
+            'signedFilePath', 'driveFileId', 'driveWebViewLink', 'currentStage', 'stageLabel', 'printedAt', 'printedByName',
+            'reviewerUids', 'transmittalHistory', 'signatures', 'hardcopyScan', 'updatedAt'
+          ])) ||
+          // Submitting author or reviewer linking a Google Drive backup copy
+          ((isOfficer() || existing().submittedByUserId == request.auth.uid) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['driveFileId', 'driveWebViewLink', 'updatedAt'])) ||
+          // Terminal Stage 5 lock for non-admins
+          (existing().currentStage < 5 && (
+            // Officer receives for E-Sign (Stage 1 -> Stage 2)
+            (isOfficer() && existing().currentStage == 1 && incoming().currentStage == 2 &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['currentStage', 'stageLabel', 'transmittalHistory', 'updatedAt'])) ||
+            // Officer applies E-Signature & issues Control No. (Stage 1..4 -> Stage 3 or 4)
+            (isOfficer() && incoming().currentStage >= 3 && incoming().currentStage <= 4 &&
+              incoming().signatures.size() == existing().signatures.size() + 1 &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['controlNumber', 'signedFilePath', 'currentStage', 'stageLabel', 'transmittalHistory', 'signatures', 'updatedAt'])) ||
+            // Officer or Submitting Author marks Printed (Stage 3 -> Stage 4)
+            ((isOfficer() || existing().submittedByUserId == request.auth.uid) &&
+              existing().currentStage == 3 && incoming().currentStage == 4 &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['currentStage', 'stageLabel', 'printedAt', 'printedByName', 'transmittalHistory', 'updatedAt'])) ||
+            // Officer or Submitting Author uploads Stage 5 Hardcopy Scan (Stage 3/4 -> Stage 5)
+            ((isOfficer() || existing().submittedByUserId == request.auth.uid) &&
+              (existing().currentStage == 3 || existing().currentStage == 4) && incoming().currentStage == 5 &&
+              incoming().hardcopyScan != null &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['currentStage', 'stageLabel', 'printedAt', 'printedByName', 'hardcopyScan', 'transmittalHistory', 'updatedAt']))
+          ))
+        );
+      allow delete: if isVerified() && isValidId(docId) && (
+        isAdmin() ||
+        (isActiveMember() && existing().submittedByUserId == request.auth.uid && existing().currentStage < 5)
+      );
+    }
+  }
+}

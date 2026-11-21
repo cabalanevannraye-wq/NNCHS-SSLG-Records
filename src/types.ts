@@ -76,6 +76,19 @@ export interface UserAccount {
   createdAt: string;
 }
 
+export interface AccountInvite {
+  id: string;
+  email: string;
+  fullName: string;
+  role: UserRole;
+  positionOrClub: string;
+  department: string;
+  active: boolean;
+  claimedUid: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface LeaderboardEntry {
   userId: string;
   fullName: string;
@@ -93,7 +106,7 @@ export interface LeaderboardEntry {
 export interface DirectoryEntry {
   userId: string;
   fullName: string;
-  email: string;
+  email?: string;
   positionOrClub: string;
   role: UserRole;
   department: string;
@@ -155,11 +168,14 @@ export interface SSLGDocument {
   fileMimeType: string;
   filePath: string;
   signedFilePath: string | null;
+  driveFileId?: string | null;
+  driveWebViewLink?: string | null;
   fileSize: number;
   currentStage: WorkflowStage;
   stageLabel: StageStatusLabel;
   printedAt: string | null;
   printedByName: string | null;
+  reviewerUids?: string[];
   transmittalHistory: TransmittalEvent[];
   signatures: SignatureRecord[];
   hardcopyScan: HardcopyScan | null;

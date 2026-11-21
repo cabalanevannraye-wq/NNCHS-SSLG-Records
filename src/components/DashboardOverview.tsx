@@ -13,7 +13,7 @@ import {
   Trash2,
   Trophy,
 } from 'lucide-react';
-import { api } from '../lib/api.ts';
+import { firebaseService } from '../lib/firebaseService.ts';
 import type {
   DocumentModuleType,
   LeaderboardEntry,
@@ -83,7 +83,7 @@ export function DashboardOverview({
     setAvatarBusy(true);
     try {
       const dataUrl = await resizeImageFileToDataUrl(file, 256);
-      const updated = await api.updateMyAvatar(dataUrl);
+      const updated = await firebaseService.updateMyAvatar(currentUser, dataUrl);
       onUserUpdated(updated);
     } catch (err) {
       setAvatarError(err instanceof Error ? err.message : 'Failed to update profile picture.');
@@ -96,7 +96,7 @@ export function DashboardOverview({
     setAvatarError('');
     setAvatarBusy(true);
     try {
-      const updated = await api.updateMyAvatar(null);
+      const updated = await firebaseService.updateMyAvatar(currentUser, null);
       onUserUpdated(updated);
     } catch (err) {
       setAvatarError(err instanceof Error ? err.message : 'Failed to remove profile picture.');
