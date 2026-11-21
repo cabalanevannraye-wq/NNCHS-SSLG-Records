@@ -1,0 +1,8 @@
+{
+  "name": "SSLG Digital Records & Transmittal",
+  "description": "NNCHS - Supreme Secondary Learner Government Digital Records, Transmittal & Document Routing System",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

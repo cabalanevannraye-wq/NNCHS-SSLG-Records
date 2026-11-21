@@ -1,0 +1,986 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import type { SSLGDocument, SystemSettings, UserAccount } from '../src/types.ts';
+import {
+  generateSampleHardcopyScanPdfBuffer,
+  generateSamplePdfBuffer,
+} from './pdfService.ts';
+
+export interface DatabaseState {
+  schemaVersion: number;
+  users: UserAccount[];
+  documents: SSLGDocument[];
+  settings: SystemSettings;
+}
+
+export const DATA_DIR = path.resolve(process.cwd(), 'data');
+export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+const DB_PATH = path.join(DATA_DIR, 'db.json');
+
+const CURRENT_SCHEMA_VERSION = 3;
+
+function ensureDirectories() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
+export function saveDatabase(state: DatabaseState) {
+  ensureDirectories();
+  fs.writeFileSync(DB_PATH, JSON.stringify(state, null, 2), 'utf-8');
+}
+
+// Placeholder 1x1 dark navy PNG signature stroke for realistic pre-seeded E-Signed samples
+const SAMPLE_SIGNATURE_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAUCAYAAADs4zK8AAAAAXNSR0IArs4c6QAAAD1JREFUWEft0zENAAAMw7D8/1M3s4sF6YKmSbo2gQABAgQIECBAgAABAgQIECBAgAABAgQIECDwLwK3A294AXm71k25AAAAAElFTkSuQmCC';
+
+export async function loadOrSeedDatabase(): Promise<DatabaseState> {
+  ensureDirectories();
+  if (fs.existsSync(DB_PATH)) {
+    try {
+      const raw = fs.readFileSync(DB_PATH, 'utf-8');
+      const parsed = JSON.parse(raw) as Partial<DatabaseState>;
+      if (parsed.schemaVersion === CURRENT_SCHEMA_VERSION) {
+        return parsed as DatabaseState;
+      }
+      if (parsed.schemaVersion === 2 && Array.isArray(parsed.users) && Array.isArray(parsed.documents) && parsed.settings) {
+        const defaultCoreMap: Record<string, 'Maka-Diyos' | 'Maka-Tao' | 'Maka-Kalikasan' | 'Makabansa'> = {
+          'doc-ar-5': 'Maka-Kalikasan',
+          'doc-ar-4': 'Maka-Tao',
+          'doc-ar-3': 'Makabansa',
+          'doc-ar-2': 'Maka-Diyos',
+          'doc-ar-1': 'Maka-Tao',
+        };
+        const migrated: DatabaseState = {
+          schemaVersion: CURRENT_SCHEMA_VERSION,
+          users: parsed.users.map((u) => ({ ...u, avatarDataUrl: u.avatarDataUrl ?? null })),
+          documents: parsed.documents.map((d) => ({
+            ...d,
+            coreValue:
+              d.docType === 'accomplishment'
+                ? d.coreValue || defaultCoreMap[d.id] || 'Maka-Tao'
+                : null,
+          })),
+          settings: {
+            ...parsed.settings,
+            organizationHeader:
+              parsed.settings.organizationHeader === 'Supreme Secondary Learner Government'
+                ? 'NNCHS · Supreme Secondary Learner Government'
+                : parsed.settings.organizationHeader,
+          },
+        };
+        saveDatabase(migrated);
+        return migrated;
+      }
+    } catch {
+      // re-seed if corrupt or old schema
+    }
+  }
+
+  const settings: SystemSettings = {
+    organizationHeader: 'NNCHS · Supreme Secondary Learner Government',
+    schoolYear: '2026-2027',
+    generalPrefix: 'SSLG-2026',
+    generalNextSequence: 4,
+    accomplishmentPrefix: 'AR-2026',
+    accomplishmentNextSequence: 4,
+  };
+
+  // Sample accounts: 1 SSLG President (Admin), 2 SSLG Officers, 2 School Clubs (NO Adviser)
+  const users: UserAccount[] = [
+    {
+      id: 'usr-pres-admin',
+      email: 'president@sslg.edu',
+      password: 'pres2026',
+      fullName: 'Marco Villanueva',
+      role: 'admin',
+      positionOrClub: 'SSLG President (Admin)',
+      department: 'Executive Committee',
+      active: true,
+      createdAt: '2026-01-05T08:00:00.000Z',
+    },
+    {
+      id: 'usr-off-sec',
+      email: 'secretary@sslg.edu',
+      password: 'sec2026',
+      fullName: 'Clarisse Mendoza',
+      role: 'officer',
+      positionOrClub: 'SSLG Secretary',
+      department: 'Secretariat & Records',
+      active: true,
+      createdAt: '2026-01-05T08:15:00.000Z',
+    },
+    {
+      id: 'usr-off-treas',
+      email: 'treasurer@sslg.edu',
+      password: 'treas2026',
+      fullName: 'Rafael Torres',
+      role: 'officer',
+      positionOrClub: 'SSLG Treasurer',
+      department: 'Finance & Ways and Means',
+      active: true,
+      createdAt: '2026-01-05T08:20:00.000Z',
+    },
+    {
+      id: 'usr-org-1',
+      email: 'scienceclub@sslg.edu',
+      password: 'science2026',
+      fullName: 'Julian Reyes',
+      role: 'organization',
+      positionOrClub: 'Young Scientists Guild',
+      department: 'STEM & Academic Clubs',
+      active: true,
+      createdAt: '2026-01-06T09:00:00.000Z',
+    },
+    {
+      id: 'usr-org-2',
+      email: 'artsclub@sslg.edu',
+      password: 'arts2026',
+      fullName: 'Patricia Lim',
+      role: 'organization',
+      positionOrClub: 'Campus Creative Collective',
+      department: 'Arts & Culture Organizations',
+      active: true,
+      createdAt: '2026-01-06T09:10:00.000Z',
+    },
+  ];
+
+  const makePdf = async (
+    fileName: string,
+    info: {
+      controlNumber: string | null;
+      title: string;
+      category: string;
+      organizationName: string;
+      documentDate: string;
+      purpose: string;
+    }
+  ) => {
+    const buf = await generateSamplePdfBuffer({
+      organizationHeader: settings.organizationHeader,
+      ...info,
+    });
+    fs.writeFileSync(path.join(UPLOADS_DIR, fileName), buf);
+    return buf.length;
+  };
+
+  const makeScanPdf = async (
+    fileName: string,
+    info: {
+      controlNumber: string;
+      title: string;
+      organizationName: string;
+      documentDate: string;
+      wetInkSignatories: string;
+    }
+  ) => {
+    const buf = await generateSampleHardcopyScanPdfBuffer({
+      organizationHeader: settings.organizationHeader,
+      ...info,
+    });
+    fs.writeFileSync(path.join(UPLOADS_DIR, fileName), buf);
+  };
+
+  // --- GENERAL DOCUMENTS across Stages 1 to 5 ---
+  const g5Size = await makePdf('SSLG-2026-0001_ScienceFair.pdf', {
+    controlNumber: 'SSLG-2026-0001',
+    title: 'Annual Science & Innovation Fair 2026 Proposal',
+    category: 'Activity Proposal',
+    organizationName: 'Young Scientists Guild',
+    documentDate: '2026-02-12',
+    purpose: 'Requesting approval for the two-day campus Science Fair and student innovation booths.',
+  });
+  await makeScanPdf('SCAN_SSLG-2026-0001.pdf', {
+    controlNumber: 'SSLG-2026-0001',
+    title: 'Annual Science & Innovation Fair 2026 Proposal',
+    organizationName: 'Young Scientists Guild',
+    documentDate: '2026-02-12',
+    wetInkSignatories: 'Marco Villanueva (SSLG President), Clarisse Mendoza (SSLG Secretary)',
+  });
+
+  const g4Size = await makePdf('SSLG-2026-0002_Q1Liquidation.pdf', {
+    controlNumber: 'SSLG-2026-0002',
+    title: 'Q1 Intramurals Booth Revenue & Expense Liquidation',
+    category: 'Financial Report',
+    organizationName: 'Campus Creative Collective',
+    documentDate: '2026-03-20',
+    purpose: 'Audited financial statement and receipts summary for Q1 Intramurals art booth.',
+  });
+
+  const g3Size = await makePdf('SSLG-2026-0003_PlasticFreeRes.pdf', {
+    controlNumber: 'SSLG-2026-0003',
+    title: 'SSLG Resolution No. 04: Campus Plastic-Free Initiative',
+    category: 'Resolution',
+    organizationName: 'Young Scientists Guild',
+    documentDate: '2026-05-14',
+    purpose: 'Student resolution establishing reusable container rules and segregation bins.',
+  });
+
+  const g2Size = await makePdf('GEN_Stage2_RoboticsWorkshop.pdf', {
+    controlNumber: null,
+    title: 'STEM Robotics Workshop & Inter-Class Quiz Bee',
+    category: 'Activity Proposal',
+    organizationName: 'Young Scientists Guild',
+    documentDate: '2026-10-18',
+    purpose: 'Proposal for weekend robotics starter workshop in Audio-Visual Room B.',
+  });
+
+  const g1Size = await makePdf('GEN_Stage1_SoundSystemLetter.pdf', {
+    controlNumber: null,
+    title: 'Request for Auditorium Sound System & Stage Permit',
+    category: 'Letter',
+    organizationName: 'Campus Creative Collective',
+    documentDate: '2026-11-10',
+    purpose: 'Formal letter requesting clearance to use auditorium audio console for Spoken Word Night.',
+  });
+
+  // --- ACCOMPLISHMENT REPORTS across Stages 1 to 5 ---
+  const ar5Size = await makePdf('AR-2026-0001_Q1ScienceAccomplishment.pdf', {
+    controlNumber: 'AR-2026-0001',
+    title: 'Q1 STEM Week & Science Fair Accomplishment Report',
+    category: 'Quarterly Accomplishment Report',
+    organizationName: 'Young Scientists Guild',
+    documentDate: '2026-03-28',
+    purpose: 'Full narrative, participant tally, and photo documentation for Q1 STEM Week.',
+  });
+  await makeScanPdf('SCAN_AR-2026-0001.pdf', {
+    controlNumber: 'AR-2026-0001',
+    title: 'Q1 STEM Week & Science Fair Accomplishment Report',
+    organizationName: 'Young Scientists Guild',
+    documentDate: '2026-03-28',
+    wetInkSignatories: 'Marco Villanueva (SSLG President), Julian Reyes (Club Lead)',
+  });
+
+  const ar4Size = await makePdf('AR-2026-0002_MuralAccomplishment.pdf', {
+    controlNumber: 'AR-2026-0002',
+    title: 'Mid-Year Cultural Showcase & Mural Project Report',
+    category: 'Event / Project Accomplishment Report',
+    organizationName: 'Campus Creative Collective',
+    documentDate: '2026-07-28',
+    purpose: 'Post-activity documentation and attendance tally for the Campus Mural Project.',
+  });
+
+  const ar3Size = await makePdf('AR-2026-0003_AugustMonthlyAR.pdf', {
+    controlNumber: 'AR-2026-0003',
+    title: 'August SSLG Secretariat Monthly Accomplishment Report',
+    category: 'Monthly Accomplishment Report',
+    organizationName: 'SSLG Secretary',
+    documentDate: '2026-08-31',
+    purpose: 'Monthly summary of general assemblies, resolutions passed, and club coordinations.',
+  });
+
+  const ar2Size = await makePdf('AR_Stage2_OctoberFinanceAR.pdf', {
+    controlNumber: null,
+    title: 'October Finance Committee Accomplishment Report',
+    category: 'Monthly Accomplishment Report',
+    organizationName: 'SSLG Treasurer',
+    documentDate: '2026-10-30',
+    purpose: 'Monthly report of audited club collections, disbursements, and ledger balances.',
+  });
+
+  const ar1Size = await makePdf('AR_Stage1_NovemberArtsAR.pdf', {
+    controlNumber: null,
+    title: 'November Spoken Word & Art Exhibit Accomplishment Report',
+    category: 'Event / Project Accomplishment Report',
+    organizationName: 'Campus Creative Collective',
+    documentDate: '2026-11-12',
+    purpose: 'Post-event accomplishment report and attendance sheets for Spoken Word Night.',
+  });
+
+  const documents: SSLGDocument[] = [
+    // General Stage 5
+    {
+      id: 'doc-gen-5',
+      docType: 'general',
+      controlNumber: 'SSLG-2026-0001',
+      title: 'Annual Science & Innovation Fair 2026 Proposal',
+      category: 'Activity Proposal',
+      documentDate: '2026-02-12',
+      purpose: 'Requesting approval for the two-day campus Science Fair and student innovation booths.',
+      submittedByUserId: 'usr-org-1',
+      authorName: 'Julian Reyes',
+      organizationName: 'Young Scientists Guild',
+      fileName: 'SSLG-2026-0001_ScienceFair.pdf',
+      fileMimeType: 'application/pdf',
+      filePath: 'SSLG-2026-0001_ScienceFair.pdf',
+      signedFilePath: null,
+      fileSize: g5Size,
+      currentStage: 5,
+      stageLabel: 'Stage 5: Completed & Archived',
+      printedAt: '2026-02-13T10:00:00.000Z',
+      printedByName: 'Clarisse Mendoza',
+      transmittalHistory: [
+        {
+          id: 'tr-g5-1',
+          stage: 1,
+          stepLabel: 'Stage 1: Uploaded by Author',
+          action: 'Submitted',
+          actorUserId: 'usr-org-1',
+          actorName: 'Julian Reyes',
+          actorPosition: 'Young Scientists Guild',
+          timestamp: '2026-02-12T08:45:00.000Z',
+          remarks: 'Uploaded prepared proposal PDF.',
+        },
+        {
+          id: 'tr-g5-2',
+          stage: 2,
+          stepLabel: 'Stage 2: Electronically Signed',
+          action: 'E-Signed',
+          actorUserId: 'usr-pres-admin',
+          actorName: 'Marco Villanueva',
+          actorPosition: 'SSLG President (Admin)',
+          timestamp: '2026-02-12T14:20:00.000Z',
+          remarks: 'Approved & E-Signed by SSLG President.',
+        },
+        {
+          id: 'tr-g5-3',
+          stage: 3,
+          stepLabel: 'Stage 3: Control Number SSLG-2026-0001 Issued',
+          action: 'Control Number Issued',
+          actorUserId: 'usr-pres-admin',
+          actorName: 'Marco Villanueva',
+          actorPosition: 'SSLG President (Admin)',
+          timestamp: '2026-02-12T14:20:00.000Z',
+          remarks: 'Auto-assigned sequential Control Number and unlocked Eartag.',
+        },
+        {
+          id: 'tr-g5-4',
+          stage: 4,
+          stepLabel: 'Stage 4: Printed with Eartag',
+          action: 'Marked Printed',
+          actorUserId: 'usr-off-sec',
+          actorName: 'Clarisse Mendoza',
+          actorPosition: 'SSLG Secretary',
+          timestamp: '2026-02-13T10:00:00.000Z',
+          remarks: 'Printed hardcopy and attached Eartag for dry seal.',
+        },
+        {
+          id: 'tr-g5-5',
+          stage: 5,
+          stepLabel: 'Stage 5: Final Printed Copy Scanned & Archived',
+          action: 'Hardcopy Scan Uploaded',
+          actorUserId: 'usr-off-sec',
+          actorName: 'Clarisse Mendoza',
+          actorPosition: 'SSLG Secretary',
+          timestamp: '2026-02-14T15:10:00.000Z',
+          remarks: 'Uploaded final stamped hardcopy scan.',
+        },
+      ],
+      signatures: [
+        {
+          id: 'sig-g5-1',
+          signerUserId: 'usr-pres-admin',
+          signerName: 'Marco Villanueva',
+          signerPosition: 'SSLG President (Admin)',
+          signatureDataUrl: SAMPLE_SIGNATURE_PNG,
+          signedAt: '2026-02-12T14:20:00.000Z',
+        },
+      ],
+      hardcopyScan: {
+        scanId: 'scan-g5',
+        fileName: 'SCAN_SSLG-2026-0001.pdf',
+        fileMimeType: 'application/pdf',
+        filePath: 'SCAN_SSLG-2026-0001.pdf',
+        uploadedByUserId: 'usr-off-sec',
+        uploadedByName: 'Clarisse Mendoza',
+        uploadedAt: '2026-02-14T15:10:00.000Z',
+        wetInkSignatories: 'Marco Villanueva (SSLG President), Clarisse Mendoza (SSLG Secretary)',
+        notes: 'Final dry-sealed hardcopy scan.',
+      },
+      createdAt: '2026-02-12T08:45:00.000Z',
+      updatedAt: '2026-02-14T15:10:00.000Z',
+    },
+    // General Stage 4
+    {
+      id: 'doc-gen-4',
+      docType: 'general',
+      controlNumber: 'SSLG-2026-0002',
+      title: 'Q1 Intramurals Booth Revenue & Expense Liquidation',
+      category: 'Financial Report',
+      documentDate: '2026-03-20',
+      purpose: 'Audited financial statement and receipts summary for Q1 Intramurals art booth.',
+      submittedByUserId: 'usr-org-2',
+      authorName: 'Patricia Lim',
+      organizationName: 'Campus Creative Collective',
+      fileName: 'SSLG-2026-0002_Q1Liquidation.pdf',
+      fileMimeType: 'application/pdf',
+      filePath: 'SSLG-2026-0002_Q1Liquidation.pdf',
+      signedFilePath: null,
+      fileSize: g4Size,
+      currentStage: 4,
+      stageLabel: 'Stage 4: Printed for Routing',
+      printedAt: '2026-03-22T09:15:00.000Z',
+      printedByName: 'Rafael Torres',
+      transmittalHistory: [
+        {
+          id: 'tr-g4-1',
+          stage: 1,
+          stepLabel: 'Stage 1: Uploaded by Author',
+          action: 'Submitted',
+          actorUserId: 'usr-org-2',
+          actorName: 'Patricia Lim',
+          actorPosition: 'Campus Creative Collective',
+          timestamp: '2026-03-20T13:20:00.000Z',
+          remarks: 'Submitted liquidation report with official receipts.',
+        },
+        {
+          id: 'tr-g4-2',
+          stage: 2,
+          stepLabel: 'Stage 2: Electronically Signed',
+          action: 'E-Signed',
+          actorUserId: 'usr-off-treas',
+          actorName: 'Rafael Torres',
+          actorPosition: 'SSLG Treasurer',
+          timestamp: '2026-03-21T11:00:00.000Z',
+          remarks: 'Audited and e-signed by SSLG Treasurer.',
+        },
+        {
+          id: 'tr-g4-3',
+          stage: 3,
+          stepLabel: 'Stage 3: Control Number SSLG-2026-0002 Issued',
+          action: 'Control Number Issued',
+          actorUserId: 'usr-off-treas',
+          actorName: 'Rafael Torres',
+          actorPosition: 'SSLG Treasurer',
+          timestamp: '2026-03-21T11:00:00.000Z',
+          remarks: 'Assigned SSLG-2026-0002.',
+        },
+        {
+          id: 'tr-g4-4',
+          stage: 4,
+          stepLabel: 'Stage 4: Printed with Eartag',
+          action: 'Marked Printed',
+          actorUserId: 'usr-off-treas',
+          actorName: 'Rafael Torres',
+          actorPosition: 'SSLG Treasurer',
+          timestamp: '2026-03-22T09:15:00.000Z',
+          remarks: 'Printed hardcopy for physical binder; awaiting final scan upload.',
+        },
+      ],
+      signatures: [
+        {
+          id: 'sig-g4-1',
+          signerUserId: 'usr-off-treas',
+          signerName: 'Rafael Torres',
+          signerPosition: 'SSLG Treasurer',
+          signatureDataUrl: SAMPLE_SIGNATURE_PNG,
+          signedAt: '2026-03-21T11:00:00.000Z',
+        },
+      ],
+      hardcopyScan: null,
+      createdAt: '2026-03-20T13:20:00.000Z',
+      updatedAt: '2026-03-22T09:15:00.000Z',
+    },
+    // General Stage 3
+    {
+      id: 'doc-gen-3',
+      docType: 'general',
+      controlNumber: 'SSLG-2026-0003',
+      title: 'SSLG Resolution No. 04: Campus Plastic-Free Initiative',
+      category: 'Resolution',
+      documentDate: '2026-05-14',
+      purpose: 'Student resolution establishing reusable container rules and segregation bins.',
+      submittedByUserId: 'usr-org-1',
+      authorName: 'Julian Reyes',
+      organizationName: 'Young Scientists Guild',
+      fileName: 'SSLG-2026-0003_PlasticFreeRes.pdf',
+      fileMimeType: 'application/pdf',
+      filePath: 'SSLG-2026-0003_PlasticFreeRes.pdf',
+      signedFilePath: null,
+      fileSize: g3Size,
+      currentStage: 3,
+      stageLabel: 'Stage 3: Control No. & Eartag Ready',
+      printedAt: null,
+      printedByName: null,
+      transmittalHistory: [
+        {
+          id: 'tr-g3-1',
+          stage: 1,
+          stepLabel: 'Stage 1: Uploaded by Author',
+          action: 'Submitted',
+          actorUserId: 'usr-org-1',
+          actorName: 'Julian Reyes',
+          actorPosition: 'Young Scientists Guild',
+          timestamp: '2026-05-14T10:00:00.000Z',
+          remarks: 'Draft resolution uploaded.',
+        },
+        {
+          id: 'tr-g3-2',
+          stage: 2,
+          stepLabel: 'Stage 2: Electronically Signed',
+          action: 'E-Signed',
+          actorUserId: 'usr-pres-admin',
+          actorName: 'Marco Villanueva',
+          actorPosition: 'SSLG President (Admin)',
+          timestamp: '2026-05-15T16:30:00.000Z',
+          remarks: 'Signed by SSLG President.',
+        },
+        {
+          id: 'tr-g3-3',
+          stage: 3,
+          stepLabel: 'Stage 3: Control Number SSLG-2026-0003 Issued',
+          action: 'Control Number Issued',
+          actorUserId: 'usr-pres-admin',
+          actorName: 'Marco Villanueva',
+          actorPosition: 'SSLG President (Admin)',
+          timestamp: '2026-05-15T16:30:00.000Z',
+          remarks: 'Control number logged; ready to print document and eartag.',
+        },
+      ],
+      signatures: [
+        {
+          id: 'sig-g3-1',
+          signerUserId: 'usr-pres-admin',
+          signerName: 'Marco Villanueva',
+          signerPosition: 'SSLG President (Admin)',
+          signatureDataUrl: SAMPLE_SIGNATURE_PNG,
+          signedAt: '2026-05-15T16:30:00.000Z',
+        },
+      ],
+      hardcopyScan: null,
+      createdAt: '2026-05-14T10:00:00.000Z',
+      updatedAt: '2026-05-15T16:30:00.000Z',
+    },
+    // General Stage 2
+    {
+      id: 'doc-gen-2',
+      docType: 'general',
+      controlNumber: null,
+      title: 'STEM Robotics Workshop & Inter-Class Quiz Bee',
+      category: 'Activity Proposal',
+      documentDate: '2026-10-18',
+      purpose: 'Proposal for weekend robotics starter workshop in Audio-Visual Room B.',
+      submittedByUserId: 'usr-org-1',
+      authorName: 'Julian Reyes',
+      organizationName: 'Young Scientists Guild',
+      fileName: 'GEN_Stage2_RoboticsWorkshop.pdf',
+      fileMimeType: 'application/pdf',
+      filePath: 'GEN_Stage2_RoboticsWorkshop.pdf',
+      signedFilePath: null,
+      fileSize: g2Size,
+      currentStage: 2,
+      stageLabel: 'Stage 2: For E-Signature',
+      printedAt: null,
+      printedByName: null,
+      transmittalHistory: [
+        {
+          id: 'tr-g2-1',
+          stage: 1,
+          stepLabel: 'Stage 1: Uploaded by Author',
+          action: 'Submitted',
+          actorUserId: 'usr-org-1',
+          actorName: 'Julian Reyes',
+          actorPosition: 'Young Scientists Guild',
+          timestamp: '2026-10-18T09:10:00.000Z',
+          remarks: 'Uploaded robotics proposal.',
+        },
+        {
+          id: 'tr-g2-2',
+          stage: 2,
+          stepLabel: 'Stage 2: Received for E-Signature',
+          action: 'Received for E-Sign',
+          actorUserId: 'usr-off-sec',
+          actorName: 'Clarisse Mendoza',
+          actorPosition: 'SSLG Secretary',
+          timestamp: '2026-10-19T08:40:00.000Z',
+          remarks: 'Checked completeness; ready for Officer/President E-Signature.',
+        },
+      ],
+      signatures: [],
+      hardcopyScan: null,
+      createdAt: '2026-10-18T09:10:00.000Z',
+      updatedAt: '2026-10-19T08:40:00.000Z',
+    },
+    // General Stage 1
+    {
+      id: 'doc-gen-1',
+      docType: 'general',
+      controlNumber: null,
+      title: 'Request for Auditorium Sound System & Stage Permit',
+      category: 'Letter',
+      documentDate: '2026-11-10',
+      purpose: 'Formal letter requesting clearance to use auditorium audio console for Spoken Word Night.',
+      submittedByUserId: 'usr-org-2',
+      authorName: 'Patricia Lim',
+      organizationName: 'Campus Creative Collective',
+      fileName: 'GEN_Stage1_SoundSystemLetter.pdf',
+      fileMimeType: 'application/pdf',
+      filePath: 'GEN_Stage1_SoundSystemLetter.pdf',
+      signedFilePath: null,
+      fileSize: g1Size,
+      currentStage: 1,
+      stageLabel: 'Stage 1: Author Submitted',
+      printedAt: null,
+      printedByName: null,
+      transmittalHistory: [
+        {
+          id: 'tr-g1-1',
+          stage: 1,
+          stepLabel: 'Stage 1: Uploaded by Author',
+          action: 'Submitted',
+          actorUserId: 'usr-org-2',
+          actorName: 'Patricia Lim',
+          actorPosition: 'Campus Creative Collective',
+          timestamp: '2026-11-10T14:30:00.000Z',
+          remarks: 'Uploaded permit request letter.',
+        },
+      ],
+      signatures: [],
+      hardcopyScan: null,
+      createdAt: '2026-11-10T14:30:00.000Z',
+      updatedAt: '2026-11-10T14:30:00.000Z',
+    },
+
+    // --- ACCOMPLISHMENT REPORTS across Stages 1 to 5 ---
+    {
+      id: 'doc-ar-5',
+      docType: 'accomplishment',
+      controlNumber: 'AR-2026-0001',
+      title: 'Q1 STEM Week & Science Fair Accomplishment Report',
+      category: 'Quarterly Accomplishment Report',
+      coreValue: 'Maka-Kalikasan',
+      documentDate: '2026-03-28',
+      purpose: 'Full narrative, participant tally, and photo documentation for Q1 STEM Week.',
+      submittedByUserId: 'usr-org-1',
+      authorName: 'Julian Reyes',
+      organizationName: 'Young Scientists Guild',
+      fileName: 'AR-2026-0001_Q1ScienceAccomplishment.pdf',
+      fileMimeType: 'application/pdf',
+      filePath: 'AR-2026-0001_Q1ScienceAccomplishment.pdf',
+      signedFilePath: null,
+      fileSize: ar5Size,
+      currentStage: 5,
+      stageLabel: 'Stage 5: Completed & Archived',
+      printedAt: '2026-03-29T10:30:00.000Z',
+      printedByName: 'Clarisse Mendoza',
+      transmittalHistory: [
+        {
+          id: 'tr-a5-1',
+          stage: 1,
+          stepLabel: 'Stage 1: Uploaded by Author',
+          action: 'Submitted',
+          actorUserId: 'usr-org-1',
+          actorName: 'Julian Reyes',
+          actorPosition: 'Young Scientists Guild',
+          timestamp: '2026-03-28T11:00:00.000Z',
+          remarks: 'Uploaded Q1 accomplishment report PDF.',
+        },
+        {
+          id: 'tr-a5-2',
+          stage: 2,
+          stepLabel: 'Stage 2: Electronically Signed',
+          action: 'E-Signed',
+          actorUserId: 'usr-pres-admin',
+          actorName: 'Marco Villanueva',
+          actorPosition: 'SSLG President (Admin)',
+          timestamp: '2026-03-28T15:40:00.000Z',
+          remarks: 'Verified and e-signed by SSLG President.',
+        },
+        {
+          id: 'tr-a5-3',
+          stage: 3,
+          stepLabel: 'Stage 3: Control Number AR-2026-0001 Issued',
+          action: 'Control Number Issued',
+          actorUserId: 'usr-pres-admin',
+          actorName: 'Marco Villanueva',
+          actorPosition: 'SSLG President (Admin)',
+          timestamp: '2026-03-28T15:40:00.000Z',
+          remarks: 'Logged under AR-2026-0001.',
+        },
+        {
+          id: 'tr-a5-4',
+          stage: 4,
+          stepLabel: 'Stage 4: Printed with Eartag',
+          action: 'Marked Printed',
+          actorUserId: 'usr-off-sec',
+          actorName: 'Clarisse Mendoza',
+          actorPosition: 'SSLG Secretary',
+          timestamp: '2026-03-29T10:30:00.000Z',
+          remarks: 'Printed hardcopy with attached Eartag.',
+        },
+        {
+          id: 'tr-a5-5',
+          stage: 5,
+          stepLabel: 'Stage 5: Final Printed Copy Scanned & Archived',
+          action: 'Hardcopy Scan Uploaded',
+          actorUserId: 'usr-off-sec',
+          actorName: 'Clarisse Mendoza',
+          actorPosition: 'SSLG Secretary',
+          timestamp: '2026-03-30T14:00:00.000Z',
+          remarks: 'Uploaded signed hardcopy scan.',
+        },
+      ],
+      signatures: [
+        {
+          id: 'sig-a5-1',
+          signerUserId: 'usr-pres-admin',
+          signerName: 'Marco Villanueva',
+          signerPosition: 'SSLG President (Admin)',
+          signatureDataUrl: SAMPLE_SIGNATURE_PNG,
+          signedAt: '2026-03-28T15:40:00.000Z',
+        },
+      ],
+      hardcopyScan: {
+        scanId: 'scan-a5',
+        fileName: 'SCAN_AR-2026-0001.pdf',
+        fileMimeType: 'application/pdf',
+        filePath: 'SCAN_AR-2026-0001.pdf',
+        uploadedByUserId: 'usr-off-sec',
+        uploadedByName: 'Clarisse Mendoza',
+        uploadedAt: '2026-03-30T14:00:00.000Z',
+        wetInkSignatories: 'Marco Villanueva (SSLG President), Julian Reyes (Club Lead)',
+        notes: 'Q1 Accomplishment binder scan.',
+      },
+      createdAt: '2026-03-28T11:00:00.000Z',
+      updatedAt: '2026-03-30T14:00:00.000Z',
+    },
+    {
+      id: 'doc-ar-4',
+      docType: 'accomplishment',
+      controlNumber: 'AR-2026-0002',
+      title: 'Mid-Year Cultural Showcase & Mural Project Report',
+      category: 'Event / Project Accomplishment Report',
+      coreValue: 'Maka-Tao',
+      documentDate: '2026-07-28',
+      purpose: 'Post-activity documentation and attendance tally for the Campus Mural Project.',
+      submittedByUserId: 'usr-org-2',
+      authorName: 'Patricia Lim',
+      organizationName: 'Campus Creative Collective',
+      fileName: 'AR-2026-0002_MuralAccomplishment.pdf',
+      fileMimeType: 'application/pdf',
+      filePath: 'AR-2026-0002_MuralAccomplishment.pdf',
+      signedFilePath: null,
+      fileSize: ar4Size,
+      currentStage: 4,
+      stageLabel: 'Stage 4: Printed for Routing',
+      printedAt: '2026-07-30T11:10:00.000Z',
+      printedByName: 'Clarisse Mendoza',
+      transmittalHistory: [
+        {
+          id: 'tr-a4-1',
+          stage: 1,
+          stepLabel: 'Stage 1: Uploaded by Author',
+          action: 'Submitted',
+          actorUserId: 'usr-org-2',
+          actorName: 'Patricia Lim',
+          actorPosition: 'Campus Creative Collective',
+          timestamp: '2026-07-28T09:15:00.000Z',
+          remarks: 'Submitted event accomplishment report.',
+        },
+        {
+          id: 'tr-a4-2',
+          stage: 2,
+          stepLabel: 'Stage 2: Electronically Signed',
+          action: 'E-Signed',
+          actorUserId: 'usr-off-sec',
+          actorName: 'Clarisse Mendoza',
+          actorPosition: 'SSLG Secretary',
+          timestamp: '2026-07-29T13:20:00.000Z',
+          remarks: 'E-Signed and verified.',
+        },
+        {
+          id: 'tr-a4-3',
+          stage: 3,
+          stepLabel: 'Stage 3: Control Number AR-2026-0002 Issued',
+          action: 'Control Number Issued',
+          actorUserId: 'usr-off-sec',
+          actorName: 'Clarisse Mendoza',
+          actorPosition: 'SSLG Secretary',
+          timestamp: '2026-07-29T13:20:00.000Z',
+          remarks: 'Assigned AR-2026-0002.',
+        },
+        {
+          id: 'tr-a4-4',
+          stage: 4,
+          stepLabel: 'Stage 4: Printed with Eartag',
+          action: 'Marked Printed',
+          actorUserId: 'usr-off-sec',
+          actorName: 'Clarisse Mendoza',
+          actorPosition: 'SSLG Secretary',
+          timestamp: '2026-07-30T11:10:00.000Z',
+          remarks: 'Printed hardcopy for dry seal; awaiting Stage 5 scan.',
+        },
+      ],
+      signatures: [
+        {
+          id: 'sig-a4-1',
+          signerUserId: 'usr-off-sec',
+          signerName: 'Clarisse Mendoza',
+          signerPosition: 'SSLG Secretary',
+          signatureDataUrl: SAMPLE_SIGNATURE_PNG,
+          signedAt: '2026-07-29T13:20:00.000Z',
+        },
+      ],
+      hardcopyScan: null,
+      createdAt: '2026-07-28T09:15:00.000Z',
+      updatedAt: '2026-07-30T11:10:00.000Z',
+    },
+    {
+      id: 'doc-ar-3',
+      docType: 'accomplishment',
+      controlNumber: 'AR-2026-0003',
+      title: 'August SSLG Secretariat Monthly Accomplishment Report',
+      category: 'Monthly Accomplishment Report',
+      coreValue: 'Makabansa',
+      documentDate: '2026-08-31',
+      purpose: 'Monthly summary of general assemblies, resolutions passed, and club coordinations.',
+      submittedByUserId: 'usr-off-sec',
+      authorName: 'Clarisse Mendoza',
+      organizationName: 'SSLG Secretary',
+      fileName: 'AR-2026-0003_AugustMonthlyAR.pdf',
+      fileMimeType: 'application/pdf',
+      filePath: 'AR-2026-0003_AugustMonthlyAR.pdf',
+      signedFilePath: null,
+      fileSize: ar3Size,
+      currentStage: 3,
+      stageLabel: 'Stage 3: Control No. & Eartag Ready',
+      printedAt: null,
+      printedByName: null,
+      transmittalHistory: [
+        {
+          id: 'tr-a3-1',
+          stage: 1,
+          stepLabel: 'Stage 1: Uploaded by Author',
+          action: 'Submitted',
+          actorUserId: 'usr-off-sec',
+          actorName: 'Clarisse Mendoza',
+          actorPosition: 'SSLG Secretary',
+          timestamp: '2026-08-31T15:00:00.000Z',
+          remarks: 'Uploaded August monthly report.',
+        },
+        {
+          id: 'tr-a3-2',
+          stage: 2,
+          stepLabel: 'Stage 2: Electronically Signed',
+          action: 'E-Signed',
+          actorUserId: 'usr-pres-admin',
+          actorName: 'Marco Villanueva',
+          actorPosition: 'SSLG President (Admin)',
+          timestamp: '2026-09-01T09:30:00.000Z',
+          remarks: 'Approved & E-Signed by SSLG President.',
+        },
+        {
+          id: 'tr-a3-3',
+          stage: 3,
+          stepLabel: 'Stage 3: Control Number AR-2026-0003 Issued',
+          action: 'Control Number Issued',
+          actorUserId: 'usr-pres-admin',
+          actorName: 'Marco Villanueva',
+          actorPosition: 'SSLG President (Admin)',
+          timestamp: '2026-09-01T09:30:00.000Z',
+          remarks: 'Control number AR-2026-0003 generated; ready to print.',
+        },
+      ],
+      signatures: [
+        {
+          id: 'sig-a3-1',
+          signerUserId: 'usr-pres-admin',
+          signerName: 'Marco Villanueva',
+          signerPosition: 'SSLG President (Admin)',
+          signatureDataUrl: SAMPLE_SIGNATURE_PNG,
+          signedAt: '2026-09-01T09:30:00.000Z',
+        },
+      ],
+      hardcopyScan: null,
+      createdAt: '2026-08-31T15:00:00.000Z',
+      updatedAt: '2026-09-01T09:30:00.000Z',
+    },
+    {
+      id: 'doc-ar-2',
+      docType: 'accomplishment',
+      controlNumber: null,
+      title: 'October Finance Committee Accomplishment Report',
+      category: 'Monthly Accomplishment Report',
+      coreValue: 'Maka-Diyos',
+      documentDate: '2026-10-30',
+      purpose: 'Monthly report of audited club collections, disbursements, and ledger balances.',
+      submittedByUserId: 'usr-off-treas',
+      authorName: 'Rafael Torres',
+      organizationName: 'SSLG Treasurer',
+      fileName: 'AR_Stage2_OctoberFinanceAR.pdf',
+      fileMimeType: 'application/pdf',
+      filePath: 'AR_Stage2_OctoberFinanceAR.pdf',
+      signedFilePath: null,
+      fileSize: ar2Size,
+      currentStage: 2,
+      stageLabel: 'Stage 2: For E-Signature',
+      printedAt: null,
+      printedByName: null,
+      transmittalHistory: [
+        {
+          id: 'tr-a2-1',
+          stage: 1,
+          stepLabel: 'Stage 1: Uploaded by Author',
+          action: 'Submitted',
+          actorUserId: 'usr-off-treas',
+          actorName: 'Rafael Torres',
+          actorPosition: 'SSLG Treasurer',
+          timestamp: '2026-10-30T16:10:00.000Z',
+          remarks: 'Uploaded October finance accomplishment report.',
+        },
+        {
+          id: 'tr-a2-2',
+          stage: 2,
+          stepLabel: 'Stage 2: Received for E-Signature',
+          action: 'Received for E-Sign',
+          actorUserId: 'usr-pres-admin',
+          actorName: 'Marco Villanueva',
+          actorPosition: 'SSLG President (Admin)',
+          timestamp: '2026-10-31T09:00:00.000Z',
+          remarks: 'Received by SSLG President for electronic signature.',
+        },
+      ],
+      signatures: [],
+      hardcopyScan: null,
+      createdAt: '2026-10-30T16:10:00.000Z',
+      updatedAt: '2026-10-31T09:00:00.000Z',
+    },
+    {
+      id: 'doc-ar-1',
+      docType: 'accomplishment',
+      controlNumber: null,
+      title: 'November Spoken Word & Art Exhibit Accomplishment Report',
+      category: 'Event / Project Accomplishment Report',
+      coreValue: 'Maka-Tao',
+      documentDate: '2026-11-12',
+      purpose: 'Post-event accomplishment report and attendance sheets for Spoken Word Night.',
+      submittedByUserId: 'usr-org-2',
+      authorName: 'Patricia Lim',
+      organizationName: 'Campus Creative Collective',
+      fileName: 'AR_Stage1_NovemberArtsAR.pdf',
+      fileMimeType: 'application/pdf',
+      filePath: 'AR_Stage1_NovemberArtsAR.pdf',
+      signedFilePath: null,
+      fileSize: ar1Size,
+      currentStage: 1,
+      stageLabel: 'Stage 1: Author Submitted',
+      printedAt: null,
+      printedByName: null,
+      transmittalHistory: [
+        {
+          id: 'tr-a1-1',
+          stage: 1,
+          stepLabel: 'Stage 1: Uploaded by Author',
+          action: 'Submitted',
+          actorUserId: 'usr-org-2',
+          actorName: 'Patricia Lim',
+          actorPosition: 'Campus Creative Collective',
+          timestamp: '2026-11-12T10:25:00.000Z',
+          remarks: 'Uploaded initial accomplishment report file.',
+        },
+      ],
+      signatures: [],
+      hardcopyScan: null,
+      createdAt: '2026-11-12T10:25:00.000Z',
+      updatedAt: '2026-11-12T10:25:00.000Z',
+    },
+  ];
+
+  const state: DatabaseState = {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    users,
+    documents,
+    settings,
+  };
+  saveDatabase(state);
+  return state;
+}
