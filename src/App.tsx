@@ -487,7 +487,9 @@ export default function App() {
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-white truncate">{currentUser.fullName}</p>
                 <p className="text-[11px] text-amber-300 truncate">{currentUser.positionOrClub}</p>
-                <p className="text-[11px] text-slate-400 truncate">{currentUser.email}</p>
+                <p className="text-[11px] text-slate-400 truncate">
+                  {currentUser.username ? `@${currentUser.username}` : currentUser.email}
+                </p>
               </div>
             </div>
             <button

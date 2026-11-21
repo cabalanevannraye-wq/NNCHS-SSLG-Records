@@ -15,8 +15,24 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { User as FirebaseUser } from 'firebase/auth';
-import { db } from '../firebase.ts';
+import {
+  createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  linkWithCredential,
+  signOut as firebaseSignOut,
+  updatePassword,
+  type User as FirebaseUser,
+} from 'firebase/auth';
+import {
+  auth,
+  db,
+  extractUsernameFromEmail,
+  getProvisionerAuth,
+  isSyntheticUsernameEmail,
+  isValidUsername,
+  normalizeUsername,
+  usernameOrEmailToAuthEmail,
+} from '../firebase.ts';
 import type {
   AccountInvite,
   CoreValue,
@@ -933,7 +949,8 @@ async function syncReviewerUidsForAdmin(): Promise<void> {
 
 export async function resolveSignedInUser(fbUser: FirebaseUser): Promise<AuthResolutionResult> {
   const email = (fbUser.email || '').trim().toLowerCase();
-  if (!fbUser.emailVerified || !email) {
+  const isSynthetic = isSyntheticUsernameEmail(email);
+  if (!email || (!fbUser.emailVerified && !isSynthetic)) {
     return { status: 'unverified', email };
   }
 
@@ -1056,6 +1073,7 @@ export async function resolveSignedInUser(fbUser: FirebaseUser): Promise<AuthRes
         status: 'authorized',
         user: {
           id: uid,
+          username: (freshDir?.username as string | undefined) ?? undefined,
           email,
           fullName: String(freshDir?.fullName || displayName),
           role: 'admin',
@@ -1122,6 +1140,8 @@ export async function resolveSignedInUser(fbUser: FirebaseUser): Promise<AuthRes
         status: 'authorized',
         user: {
           id: uid,
+          username:
+            (dirData.username as string | undefined) ?? extractUsernameFromEmail(email),
           email,
           fullName: String(dirData.fullName || fbUser.displayName || email),
           role: (dirData.role as UserRole) || priv.role,
@@ -1216,6 +1236,7 @@ export async function resolveSignedInUser(fbUser: FirebaseUser): Promise<AuthRes
       status: 'authorized',
       user: {
         id: uid,
+        username: extractUsernameFromEmail(email),
         email,
         fullName: invite.fullName,
         role: invite.role,
@@ -1305,6 +1326,7 @@ export function subscribeWorkspaceData(
           const uid = String(data.uid || d.id);
           return {
             id: uid,
+            username: (data.username as string | undefined) ?? undefined,
             email: uid === currentUser.id ? currentUser.email : '',
             fullName: String(data.fullName || ''),
             role: (data.role as UserRole) || 'organization',
@@ -1356,12 +1378,12 @@ export function subscribeWorkspaceData(
   );
 
   // 4. Documents listener (rule-aligned query by role)
-  const isBootstrapped = currentUser.email.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL;
-  const docsQuery = isBootstrapped
-    ? collection(db, 'documents')
-    : currentUser.role === 'admin' || currentUser.role === 'officer'
-    ? query(collection(db, 'documents'), where('reviewerUids', 'array-contains', currentUser.id))
-    : query(collection(db, 'documents'), where('submittedByUserId', '==', currentUser.id));
+  const docsQuery =
+    currentUser.role === 'admin'
+      ? collection(db, 'documents')
+      : currentUser.role === 'officer'
+      ? query(collection(db, 'documents'), where('reviewerUids', 'array-contains', currentUser.id))
+      : query(collection(db, 'documents'), where('submittedByUserId', '==', currentUser.id));
 
   unsubs.push(
     onSnapshot(
@@ -1524,9 +1546,12 @@ export const firebaseService = {
       return snap.docs
         .map((d) => {
           const data = d.data() as Record<string, unknown>;
+          const email = String(data.email || '');
           return {
             id: d.id,
-            email: String(data.email || ''),
+            username:
+              (data.username as string | undefined) ?? extractUsernameFromEmail(email),
+            email,
             fullName: String(data.fullName || ''),
             role: (data.role as UserRole) || 'organization',
             positionOrClub: String(data.positionOrClub || ''),
@@ -1540,6 +1565,180 @@ export const firebaseService = {
         .sort((a, b) => a.positionOrClub.localeCompare(b.positionOrClub));
     } catch (err) {
       handleFirestoreError(err, OperationType.LIST, 'invites');
+    }
+  },
+
+  createUsernamePasswordAccount: async (
+    actorUid: string,
+    payload: {
+      username: string;
+      password: string;
+      fullName: string;
+      role: UserRole;
+      positionOrClub: string;
+      department: string;
+    }
+  ): Promise<AccountInvite> => {
+    const cleanUsername = normalizeUsername(payload.username);
+    if (!isValidUsername(cleanUsername)) {
+      throw new Error(
+        'Username must be 3–60 characters using only letters, numbers, dots (.), underscores (_), or hyphens (-).'
+      );
+    }
+    if (!payload.password || payload.password.length < 6) {
+      throw new Error('Password must be at least 6 characters long.');
+    }
+
+    const authEmail = usernameOrEmailToAuthEmail(cleanUsername);
+    const inviteId = toInviteId(cleanUsername);
+    const inviteRef = doc(db, 'invites', inviteId);
+
+    const existingInvite = await getDoc(inviteRef);
+    if (existingInvite.exists()) {
+      throw new Error(`Username "${cleanUsername}" is already in use.`);
+    }
+
+    let newUid = '';
+    const provisionerAuth = await getProvisionerAuth();
+    try {
+      const cred = await createUserWithEmailAndPassword(
+        provisionerAuth,
+        authEmail,
+        payload.password
+      );
+      newUid = cred.user.uid;
+      await firebaseSignOut(provisionerAuth).catch(() => undefined);
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'auth/operation-not-allowed') {
+        throw new Error(
+          'Email/Password sign-in is not yet enabled in Firebase Console. Open Firebase Console → Authentication → Sign-in method → Enable Email/Password, then try again.'
+        );
+      }
+      if (code === 'auth/email-already-in-use') {
+        throw new Error(`Username "${cleanUsername}" is already registered in Firebase Auth.`);
+      }
+      if (code === 'auth/weak-password') {
+        throw new Error('Password is too weak. Use at least 6 characters.');
+      }
+      throw err instanceof Error ? err : new Error('Failed to create login credentials.');
+    }
+
+    const trimmedFullName = payload.fullName.trim();
+    const trimmedPos = payload.positionOrClub.trim();
+    const trimmedDept = payload.department.trim() || 'Student Governance';
+
+    try {
+      // Write user_private first so isAdmin() checks referencing admins/{uid} + user_private/{uid} succeed
+      await setDoc(doc(db, 'user_private', newUid), {
+        uid: newUid,
+        username: cleanUsername,
+        email: authEmail,
+        role: payload.role,
+        active: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      await setDoc(doc(db, 'user_directory', newUid), {
+        uid: newUid,
+        username: cleanUsername,
+        fullName: trimmedFullName,
+        role: payload.role,
+        positionOrClub: trimmedPos,
+        department: trimmedDept,
+        avatarDataUrl: null,
+        active: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      await setDoc(doc(db, 'contributor_stats', newUid), {
+        uid: newUid,
+        isPublicStat: true,
+        totalPassed: 0,
+        ongoingCount: 0,
+        completedCount: 0,
+        generalCount: 0,
+        accomplishmentCount: 0,
+        latestDocumentDate: null,
+        updatedAt: serverTimestamp(),
+      });
+
+      if (payload.role === 'admin') {
+        await setDoc(doc(db, 'admins', newUid), {
+          uid: newUid,
+          grantedBy: actorUid,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      await setDoc(inviteRef, {
+        username: cleanUsername,
+        email: authEmail,
+        fullName: trimmedFullName,
+        role: payload.role,
+        positionOrClub: trimmedPos,
+        department: trimmedDept,
+        active: true,
+        claimedUid: newUid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      if (payload.role === 'admin' || payload.role === 'officer') {
+        void syncReviewerUidsForAdmin();
+      }
+
+      const now = new Date().toISOString();
+      return {
+        id: inviteId,
+        username: cleanUsername,
+        email: authEmail,
+        fullName: trimmedFullName,
+        role: payload.role,
+        positionOrClub: trimmedPos,
+        department: trimmedDept,
+        active: true,
+        claimedUid: newUid,
+        createdAt: now,
+        updatedAt: now,
+      };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `invites/${inviteId}`);
+    }
+  },
+
+  setMyPassword: async (newPassword: string): Promise<void> => {
+    const user = auth.currentUser;
+    if (!user || !user.email) {
+      throw new Error('You must be signed in to set or change your password.');
+    }
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error('Password must be at least 6 characters long.');
+    }
+
+    const hasPasswordProvider = user.providerData.some((p) => p.providerId === 'password');
+    try {
+      if (hasPasswordProvider) {
+        await updatePassword(user, newPassword);
+      } else {
+        const credential = EmailAuthProvider.credential(user.email, newPassword);
+        await linkWithCredential(user, credential);
+      }
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'auth/operation-not-allowed') {
+        throw new Error(
+          'Email/Password sign-in is not yet enabled in Firebase Console. Enable Email/Password under Authentication → Sign-in method first.'
+        );
+      }
+      if (code === 'auth/requires-recent-login') {
+        throw new Error(
+          'For security, please sign out and sign back in right before changing your password.'
+        );
+      }
+      throw err instanceof Error ? err : new Error('Failed to update password.');
     }
   },
 

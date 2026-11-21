@@ -65,6 +65,7 @@ export type TransmittalAction =
 
 export interface UserAccount {
   id: string;
+  username?: string;
   email: string;
   password?: string;
   fullName: string;
@@ -78,6 +79,7 @@ export interface UserAccount {
 
 export interface AccountInvite {
   id: string;
+  username?: string;
   email: string;
   fullName: string;
   role: UserRole;

@@ -56,14 +56,22 @@ async function verifyFirebaseIdToken(idToken: string | undefined): Promise<Verif
       }>;
     };
     const user = payload.users?.[0];
-    if (!user || !user.localId || !user.email || user.disabled || user.emailVerified !== true) {
+    const userEmail = (user?.email || '').toLowerCase();
+    const isSyntheticUsername = userEmail.endsWith('@accounts.sslgnnchs26.site');
+    if (
+      !user ||
+      !user.localId ||
+      !userEmail ||
+      user.disabled ||
+      (user.emailVerified !== true && !isSyntheticUsername)
+    ) {
       return null;
     }
 
     const verified: VerifiedTokenUser = {
       uid: user.localId,
-      email: user.email.toLowerCase(),
-      emailVerified: true,
+      email: userEmail,
+      emailVerified: Boolean(user.emailVerified),
       expiresAt: Date.now() + 60_000,
     };
 

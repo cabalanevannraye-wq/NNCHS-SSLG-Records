@@ -12,6 +12,10 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
     }
 
+    function isValidUsername(u) {
+      return u is string && u.size() >= 3 && u.size() <= 60 && u.matches('^[a-zA-Z0-9._-]+$');
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -32,24 +36,25 @@ service cloud.firestore {
       return isVerified() && request.auth.token.email == 'cabalan.evann.raye@gmail.com';
     }
 
+    function isActiveUserPrivate() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/user_private/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/user_private/$(request.auth.uid)).data.active == true;
+    }
+
     function isAdmin() {
       return isBootstrappedAdmin() || (
-        isVerified() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        isActiveUserPrivate() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
 
     function isActiveMember() {
-      return isBootstrappedAdmin() || (
-        isVerified() &&
-        exists(/databases/$(database)/documents/user_private/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/user_private/$(request.auth.uid)).data.active == true
-      );
+      return isBootstrappedAdmin() || isActiveUserPrivate();
     }
 
     function isOfficer() {
-      return isVerified() &&
-        exists(/databases/$(database)/documents/user_private/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/user_private/$(request.auth.uid)).data.active == true &&
+      return isActiveUserPrivate() &&
         get(/databases/$(database)/documents/user_private/$(request.auth.uid)).data.role == 'officer';
     }
 
@@ -80,7 +85,8 @@ service cloud.firestore {
 
     function isValidInvite(data) {
       return data.keys().hasAll(['email', 'fullName', 'role', 'positionOrClub', 'department', 'active', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['email', 'fullName', 'role', 'positionOrClub', 'department', 'active', 'claimedUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['username', 'email', 'fullName', 'role', 'positionOrClub', 'department', 'active', 'claimedUid', 'createdAt', 'updatedAt']) &&
+        (!('username' in data) || data.username == null || isValidUsername(data.username)) &&
         data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
         data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
         data.role in ['admin', 'officer', 'organization'] &&
@@ -94,8 +100,9 @@ service cloud.firestore {
 
     function isValidUserDirectory(data) {
       return data.keys().hasAll(['uid', 'fullName', 'role', 'positionOrClub', 'department', 'active', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'fullName', 'role', 'positionOrClub', 'department', 'avatarDataUrl', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'username', 'fullName', 'role', 'positionOrClub', 'department', 'avatarDataUrl', 'active', 'createdAt', 'updatedAt']) &&
         isValidId(data.uid) &&
+        (!('username' in data) || data.username == null || isValidUsername(data.username)) &&
         data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
         data.role in ['admin', 'officer', 'organization'] &&
         data.positionOrClub is string && data.positionOrClub.size() >= 1 && data.positionOrClub.size() <= 120 &&
@@ -108,8 +115,9 @@ service cloud.firestore {
 
     function isValidUserPrivate(data) {
       return data.keys().hasAll(['uid', 'email', 'role', 'active', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'email', 'role', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'username', 'email', 'role', 'active', 'createdAt', 'updatedAt']) &&
         isValidId(data.uid) &&
+        (!('username' in data) || data.username == null || isValidUsername(data.username)) &&
         data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
         data.role in ['admin', 'officer', 'organization'] &&
         data.active is bool &&
@@ -197,118 +205,114 @@ service cloud.firestore {
     }
 
     match /admins/{uid} {
-      allow get: if isVerified() && isValidId(uid) && (uid == request.auth.uid || isAdmin());
-      allow list: if isBootstrappedAdmin();
-      allow create: if isVerified() && isValidId(uid) &&
+      allow get: if isSignedIn() && isValidId(uid) && (uid == request.auth.uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && isValidId(uid) &&
         isValidAdminDoc(incoming()) &&
         incoming().uid == uid &&
         incoming().createdAt == request.time &&
         (isAdmin() || (isBootstrappedAdmin() && uid == request.auth.uid));
       allow update: if false;
-      allow delete: if isVerified() && isValidId(uid) && isAdmin() && uid != request.auth.uid;
+      allow delete: if isAdmin() && isValidId(uid) && uid != request.auth.uid;
     }
 
     match /invites/{inviteId} {
-      allow get: if isVerified() && isValidId(inviteId) && (
-        isAdmin() || resource == null || existing().email == request.auth.token.email.lower()
+      allow get: if isSignedIn() && isValidId(inviteId) && (
+        isAdmin() ||
+        (isVerified() && (resource == null || existing().email == request.auth.token.email.lower()))
       );
-      allow list: if isVerified() && (
-        isBootstrappedAdmin() || resource.data.email == request.auth.token.email.lower()
-      );
-      allow create: if isVerified() && isValidId(inviteId) &&
+      allow list: if isAdmin() || (isVerified() && resource.data.email == request.auth.token.email.lower());
+      allow create: if isAdmin() && isValidId(inviteId) &&
         isValidInvite(incoming()) &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time &&
-        isAdmin();
-      allow update: if isVerified() && isValidId(inviteId) &&
+        incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(inviteId) &&
         isValidInvite(incoming()) &&
         incoming().email == existing().email &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time && (
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'role', 'positionOrClub', 'department', 'active', 'claimedUid', 'updatedAt'])) ||
-          (existing().email == request.auth.token.email.lower() && existing().active == true && incoming().claimedUid == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['claimedUid', 'updatedAt']))
+          (isVerified() && existing().email == request.auth.token.email.lower() && existing().active == true && incoming().claimedUid == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['claimedUid', 'updatedAt']))
         );
-      allow delete: if isVerified() && isValidId(inviteId) && isAdmin();
+      allow delete: if isAdmin() && isValidId(inviteId);
     }
 
     match /user_directory/{uid} {
-      allow get: if isVerified() && isValidId(uid) && (
+      allow get: if isSignedIn() && isValidId(uid) && (
         uid == request.auth.uid || isAdmin() || (isActiveMember() && existing().active == true)
       );
-      allow list: if isVerified() && (
-        isBootstrappedAdmin() || resource.data.uid == request.auth.uid || resource.data.active == true
+      allow list: if isAdmin() || (
+        isActiveMember() && (resource.data.uid == request.auth.uid || resource.data.active == true)
       );
-      allow create: if isVerified() && isValidId(uid) &&
+      allow create: if isSignedIn() && isValidId(uid) &&
         isValidUserDirectory(incoming()) &&
         incoming().uid == uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time && (
           isAdmin() ||
-          (uid == request.auth.uid && (
+          (isVerified() && uid == request.auth.uid && (
             (isBootstrappedAdmin() && incoming().role == 'admin') ||
             hasValidInviteForRole(incoming().role)
           ))
         );
-      allow update: if isVerified() && isValidId(uid) &&
+      allow update: if isSignedIn() && isValidId(uid) &&
         isValidUserDirectory(incoming()) &&
         incoming().uid == existing().uid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time && (
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'role', 'positionOrClub', 'department', 'avatarDataUrl', 'active', 'updatedAt'])) ||
-          (uid == request.auth.uid && existing().active == true && incoming().diff(existing()).affectedKeys().hasOnly(['avatarDataUrl', 'fullName', 'updatedAt']))
+          (uid == request.auth.uid && isActiveMember() && existing().active == true && incoming().diff(existing()).affectedKeys().hasOnly(['avatarDataUrl', 'fullName', 'updatedAt']))
         );
-      allow delete: if isVerified() && isValidId(uid) && isAdmin() && uid != request.auth.uid;
+      allow delete: if isAdmin() && isValidId(uid) && uid != request.auth.uid;
     }
 
     match /user_private/{uid} {
-      allow get: if isVerified() && isValidId(uid) && (uid == request.auth.uid || isAdmin());
-      allow list: if isVerified() && (isBootstrappedAdmin() || resource.data.uid == request.auth.uid);
-      allow create: if isVerified() && isValidId(uid) &&
+      allow get: if isSignedIn() && isValidId(uid) && (uid == request.auth.uid || isAdmin());
+      allow list: if isAdmin() || (isActiveMember() && resource.data.uid == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(uid) &&
         isValidUserPrivate(incoming()) &&
         incoming().uid == uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time && (
           isAdmin() ||
-          (uid == request.auth.uid && incoming().email == request.auth.token.email.lower() && (
+          (isVerified() && uid == request.auth.uid && incoming().email == request.auth.token.email.lower() && (
             (isBootstrappedAdmin() && incoming().role == 'admin') ||
             hasValidInviteForRole(incoming().role)
           ))
         );
-      allow update: if isVerified() && isValidId(uid) &&
+      allow update: if isAdmin() && isValidId(uid) &&
         isValidUserPrivate(incoming()) &&
         incoming().uid == existing().uid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        isAdmin() &&
         incoming().diff(existing()).affectedKeys().hasOnly(['email', 'role', 'active', 'updatedAt']);
-      allow delete: if isVerified() && isValidId(uid) && isAdmin() && uid != request.auth.uid;
+      allow delete: if isAdmin() && isValidId(uid) && uid != request.auth.uid;
     }
 
     match /contributor_stats/{uid} {
-      allow get: if isVerified() && isValidId(uid) && (uid == request.auth.uid || isActiveMember());
-      allow list: if isVerified() && (isBootstrappedAdmin() || resource.data.isPublicStat == true);
-      allow create: if isVerified() && isValidId(uid) &&
+      allow get: if isSignedIn() && isValidId(uid) && (uid == request.auth.uid || isActiveMember());
+      allow list: if isAdmin() || (isActiveMember() && resource.data.isPublicStat == true);
+      allow create: if isSignedIn() && isValidId(uid) &&
         isValidContributorStat(incoming()) &&
         incoming().uid == uid &&
         incoming().updatedAt == request.time &&
         (isAdmin() || isOfficer() || (uid == request.auth.uid && isActiveMember()));
-      allow update: if isVerified() && isValidId(uid) &&
+      allow update: if isSignedIn() && isValidId(uid) &&
         isValidContributorStat(incoming()) &&
         incoming().uid == existing().uid &&
         incoming().updatedAt == request.time &&
         (isAdmin() || isOfficer() || (uid == request.auth.uid && isActiveMember())) &&
         incoming().diff(existing()).affectedKeys().hasOnly(['totalPassed', 'ongoingCount', 'completedCount', 'generalCount', 'accomplishmentCount', 'latestDocumentDate', 'updatedAt']);
-      allow delete: if isVerified() && isValidId(uid) && isAdmin();
+      allow delete: if isAdmin() && isValidId(uid);
     }
 
     match /settings/{settingId} {
-      allow get: if isVerified() && isValidId(settingId) && isActiveMember();
+      allow get: if isActiveMember() && isValidId(settingId);
       allow list: if false;
-      allow create: if isVerified() && settingId == 'global' &&
+      allow create: if isAdmin() && settingId == 'global' &&
         isValidSettings(incoming()) &&
-        incoming().updatedAt == request.time &&
-        isAdmin();
-      allow update: if isVerified() && settingId == 'global' &&
+        incoming().updatedAt == request.time;
+      allow update: if isOfficerOrAdmin() && settingId == 'global' &&
         isValidSettings(incoming()) &&
         incoming().updatedAt == request.time && (
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['organizationHeader', 'schoolYear', 'generalPrefix', 'generalNextSequence', 'accomplishmentPrefix', 'accomplishmentNextSequence', 'updatedAt'])) ||
@@ -318,25 +322,26 @@ service cloud.firestore {
     }
 
     match /documents/{docId} {
-      allow get: if isVerified() && isValidId(docId) && (
+      allow get: if isActiveMember() && isValidId(docId) && (
         isAdmin() ||
         existing().submittedByUserId == request.auth.uid ||
         (isOfficer() && request.auth.uid in existing().reviewerUids)
       );
-      allow list: if isVerified() && (
-        isBootstrappedAdmin() ||
-        resource.data.submittedByUserId == request.auth.uid ||
-        request.auth.uid in resource.data.reviewerUids
+      allow list: if isAdmin() || (
+        isActiveMember() && (
+          resource.data.submittedByUserId == request.auth.uid ||
+          request.auth.uid in resource.data.reviewerUids
+        )
       );
-      allow create: if isVerified() && isValidId(docId) &&
+      allow create: if isActiveMember() && isValidId(docId) &&
         isValidDocumentRecord(incoming()) &&
         incoming().id == docId &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time && (
           isAdmin() ||
-          (isActiveMember() && incoming().submittedByUserId == request.auth.uid && incoming().currentStage == 1 && incoming().controlNumber == null)
+          (incoming().submittedByUserId == request.auth.uid && incoming().currentStage == 1 && incoming().controlNumber == null)
         );
-      allow update: if isVerified() && isValidId(docId) &&
+      allow update: if isActiveMember() && isValidId(docId) &&
         isValidDocumentRecord(incoming()) &&
         incoming().id == existing().id &&
         incoming().docType == existing().docType &&
@@ -372,9 +377,9 @@ service cloud.firestore {
               incoming().diff(existing()).affectedKeys().hasOnly(['currentStage', 'stageLabel', 'printedAt', 'printedByName', 'hardcopyScan', 'transmittalHistory', 'updatedAt']))
           ))
         );
-      allow delete: if isVerified() && isValidId(docId) && (
+      allow delete: if isActiveMember() && isValidId(docId) && (
         isAdmin() ||
-        (isActiveMember() && existing().submittedByUserId == request.auth.uid && existing().currentStage < 5)
+        (existing().submittedByUserId == request.auth.uid && existing().currentStage < 5)
       );
     }
   }

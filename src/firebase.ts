@@ -1,9 +1,12 @@
-import { initializeApp } from 'firebase/app';
+import { getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import {
   GoogleAuthProvider,
   getAuth,
-  reauthenticateWithPopup,
+  inMemoryPersistence,
+  setPersistence,
   signInWithPopup,
+  signOut,
+  type Auth,
 } from 'firebase/auth';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -14,6 +17,44 @@ export const db = typedConfig.firestoreDatabaseId
   ? getFirestore(app, typedConfig.firestoreDatabaseId)
   : getFirestore(app);
 export const auth = getAuth(app);
+
+export const SYNTHETIC_AUTH_DOMAIN = 'accounts.sslgnnchs26.site';
+
+export function normalizeUsername(input: string): string {
+  return input.trim().toLowerCase().replace(/^@+/, '');
+}
+
+export function isValidUsername(username: string): boolean {
+  return /^[a-z0-9._-]{3,60}$/.test(normalizeUsername(username));
+}
+
+export function isSyntheticUsernameEmail(email: string): boolean {
+  return email.trim().toLowerCase().endsWith(`@${SYNTHETIC_AUTH_DOMAIN}`);
+}
+
+export function extractUsernameFromEmail(email: string): string | undefined {
+  const lower = email.trim().toLowerCase();
+  const suffix = `@${SYNTHETIC_AUTH_DOMAIN}`;
+  return lower.endsWith(suffix) ? lower.slice(0, -suffix.length) : undefined;
+}
+
+export function usernameOrEmailToAuthEmail(input: string): string {
+  const clean = normalizeUsername(input);
+  if (clean.includes('@')) return clean;
+  return `${clean}@${SYNTHETIC_AUTH_DOMAIN}`;
+}
+
+function getSecondaryNamedApp(name: string): FirebaseApp {
+  const existing = getApps().find((a) => a.name === name);
+  return existing || initializeApp(typedConfig, name);
+}
+
+export async function getProvisionerAuth(): Promise<Auth> {
+  const secondaryApp = getSecondaryNamedApp('account-provisioner');
+  const secondaryAuth = getAuth(secondaryApp);
+  await setPersistence(secondaryAuth, inMemoryPersistence);
+  return secondaryAuth;
+}
 
 export const GOOGLE_DRIVE_SCOPES = [
   'https://www.googleapis.com/auth/drive',
@@ -66,11 +107,13 @@ export function subscribeDriveTokenChange(
 }
 
 export async function connectGoogleDriveWithPopup(): Promise<string> {
-  const result = auth.currentUser
-    ? await reauthenticateWithPopup(auth.currentUser, googleProvider)
-    : await signInWithPopup(auth, googleProvider);
+  const driveApp = getSecondaryNamedApp('drive-oauth-helper');
+  const driveAuth = getAuth(driveApp);
+  await setPersistence(driveAuth, inMemoryPersistence);
+  const result = await signInWithPopup(driveAuth, googleProvider);
   const credential = GoogleAuthProvider.credentialFromResult(result);
   const accessToken = credential?.accessToken;
+  await signOut(driveAuth).catch(() => undefined);
   if (!accessToken) {
     throw new Error('Google did not return a Drive access token. Please try again and allow Drive access.');
   }
