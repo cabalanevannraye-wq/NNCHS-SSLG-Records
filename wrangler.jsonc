@@ -1,0 +1,15 @@
+{
+  "name": "sslgnnchs26",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "SSLG_KV",
+      "id": "145eb65dd5864327aef5d049f2b3d6bb"
+    }
+  ]
+}
