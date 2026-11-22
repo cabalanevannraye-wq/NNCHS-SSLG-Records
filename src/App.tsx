@@ -23,6 +23,7 @@ import {
   Menu,
   MessageCircle,
   Printer,
+  RefreshCw,
   ShieldAlert,
   Sparkles,
   Users,
@@ -172,7 +173,7 @@ export default function App() {
   const [portalState, setPortalState] = useState<PortalState>(() => loadPortalState());
   const portalStateRef = useRef<PortalState>(portalState);
   portalStateRef.current = portalState;
-  const [syncMode, setSyncMode] = useState<SyncConnectionMode>('local');
+  const [syncMode, setSyncMode] = useState<SyncConnectionMode>('cloud');
   const [syncing, setSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(
     () => portalState.lastPublishedAt ?? null
@@ -333,10 +334,14 @@ export default function App() {
         setPortalState(res.state);
         portalStateRef.current = res.state;
         if (!silent) {
-          notify('Pulled latest published website updates.');
+          notify('Synced latest published portal data across all devices.');
         }
       } else if (!silent) {
-        notify('Sync checked. Showing latest available portal state.');
+        if (res.error) {
+          notify(res.error);
+        } else {
+          notify('Cloud sync verified. Portal is up to date.');
+        }
       }
     } finally {
       setSyncing(false);
@@ -345,24 +350,20 @@ export default function App() {
 
   const pushStateToCloud = async (targetState: PortalState, showToast = false) => {
     const token = await resolveActiveAuthToken();
-    if (!token) return;
     setSyncing(true);
     try {
       const res = await publishToCloud(targetState, token);
       setSyncMode(res.mode);
       setLastSyncedAt(res.updatedAt);
+      if (res.publishedState) {
+        setPortalState(res.publishedState);
+        portalStateRef.current = res.publishedState;
+      }
       if (showToast) {
         if (res.ok) {
-          notify(
-            res.mode === 'cloud'
-              ? 'Published to Cloud Sync — visible to all visitors worldwide.'
-              : 'Published to shared server — visible to all campus visitors.'
-          );
+          notify('Published to Live Portal (Synced Across All Devices)');
         } else {
-          notify(
-            res.error ||
-              'Saved locally. Connect the shared server or External Cloud Sync URL for cross-device publishing.'
-          );
+          notify(res.error || 'Unable to reach Live Cloud URL.');
         }
       }
     } finally {
@@ -415,6 +416,16 @@ export default function App() {
 
   useEffect(() => {
     void handlePullCloudNow(true);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void handlePullCloudNow(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -1070,6 +1081,15 @@ export default function App() {
                 <button
                   type="button"
                   disabled={syncing}
+                  onClick={() => void handlePullCloudNow(false)}
+                  className="px-3 py-2 text-xs font-extrabold bg-blue-50 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-blue-950 dark:text-[#fde047] border border-blue-200 dark:border-slate-700 rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">Sync Latest</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={syncing}
                   onClick={() => void handlePublishNow()}
                   className="px-3 py-2 text-xs font-extrabold bg-[#facc15] hover:bg-[#eab308] text-slate-950 rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
                 >
@@ -1367,6 +1387,8 @@ export default function App() {
         onNavigate={navigatePortal}
         onOpenHub={handleOpenHub}
         onOpenWelcome={() => setWelcomeOpen(true)}
+        onSyncLatest={() => void handlePullCloudNow(false)}
+        syncing={syncing}
         isAuthenticated={hasHubAccess && !initializing}
       />
 

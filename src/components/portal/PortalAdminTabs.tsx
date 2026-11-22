@@ -37,8 +37,10 @@ import {
 import {
   DEFAULT_YORP_LOGO_PATH,
   PRINT_TIMELINE_STEPS,
+  SHARED_CLOUD_URL,
   exportPortalSnapshotJson,
   loadSyncConfig,
+  normalizeCloudSyncUrl,
   parsePortalSnapshotJson,
   readFileAsDataUrl,
   saveSyncConfig,
@@ -2403,13 +2405,13 @@ export function PortalAdminTabs({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
           <div className="lg:col-span-7">
             <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-              Optional External Cloud Sync URL (JSONBin v3 / Google Apps Script / Webhook)
+              Live Shared Cloud Sync Endpoint (Defaulted Automatically for All Devices)
             </label>
             <input
               type="url"
               value={syncApiUrlInput}
               onChange={(e) => setSyncApiUrlInput(e.target.value)}
-              placeholder="https://script.google.com/macros/s/.../exec or https://api.jsonbin.io/v3/b/..."
+              placeholder={SHARED_CLOUD_URL}
               className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
             />
           </div>
@@ -2418,11 +2420,13 @@ export function PortalAdminTabs({
               type="button"
               disabled={syncing}
               onClick={async () => {
-                saveSyncConfig({ syncApiUrl: syncApiUrlInput });
+                const resolved = normalizeCloudSyncUrl(syncApiUrlInput);
+                setSyncApiUrlInput(resolved);
+                saveSyncConfig({ syncApiUrl: resolved });
                 onNotify(
                   syncApiUrlInput.trim()
-                    ? 'External Cloud Sync URL saved. Pulling latest shared data...'
-                    : 'External Cloud Sync URL cleared (using built-in shared server).'
+                    ? 'Live Cloud Sync URL saved. Syncing latest shared data...'
+                    : 'Reset to default Shared Cloud Database. Syncing latest data...'
                 );
                 await onPullCloudNow?.();
               }}
@@ -2439,7 +2443,7 @@ export function PortalAdminTabs({
                 className="px-3.5 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-blue-950 dark:text-slate-100 border border-blue-200 dark:border-slate-700 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
-                <span>Pull Latest</span>
+                <span>Sync Latest</span>
               </button>
             )}
             {onPublishNow && (

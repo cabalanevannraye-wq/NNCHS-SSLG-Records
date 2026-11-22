@@ -1,5 +1,7 @@
 import { buildApiUrl } from './api.ts';
 
+export const SHARED_CLOUD_URL =
+  'https://nnchs-g-portal-default-rtdb.asia-southeast1.firebasedatabase.app/portalState.json';
 export const PORTAL_STORAGE_KEY = 'nnchs_sslg_shared_state_v2';
 export const LEGACY_PORTAL_STORAGE_KEYS = [
   'nnchs_sslg_shared_state_v1',
@@ -14,6 +16,12 @@ export type SyncConnectionMode = 'cloud' | 'server' | 'local';
 
 export interface CloudSyncConfig {
   syncApiUrl: string;
+}
+
+export function normalizeCloudSyncUrl(raw?: string | null): string {
+  const clean = typeof raw === 'string' ? raw.trim() : '';
+  if (!clean) return SHARED_CLOUD_URL;
+  return clean.replace(/([^:]\/)\/+/g, '$1');
 }
 
 export interface AboutPhotoItem {
@@ -234,6 +242,7 @@ export interface LearnerServicesContact {
 }
 
 export interface PortalState {
+  syncUrl?: string;
   schoolYear: string;
   campusAdvisory: string;
   tickerMessages: string[];
@@ -298,6 +307,7 @@ function makeProgramPhotoSvg(title: string, badge: string): string {
 }
 
 export const DEFAULT_PORTAL_STATE: PortalState = {
+  syncUrl: SHARED_CLOUD_URL,
   schoolYear: '2026–2027',
   campusAdvisory:
     'Project ‘Free Printing’ for all Learners accepts Black & White and Colored Print files at the SSLG Office (Room 104). Submit files online and follow your live Status Tracker anytime.',
@@ -867,6 +877,7 @@ export function normalizePortalState(parsed: Partial<PortalState> | null | undef
   return {
     ...DEFAULT_PORTAL_STATE,
     ...parsed,
+    syncUrl: normalizeCloudSyncUrl(parsed.syncUrl),
     aboutPhotos:
       Array.isArray(parsed.aboutPhotos) && parsed.aboutPhotos.length > 0
         ? parsed.aboutPhotos
@@ -883,11 +894,11 @@ export function normalizePortalState(parsed: Partial<PortalState> | null | undef
 export function loadSyncConfig(): CloudSyncConfig {
   try {
     const raw = localStorage.getItem(SYNC_CONFIG_KEY);
-    if (!raw) return { syncApiUrl: '' };
+    if (!raw) return { syncApiUrl: SHARED_CLOUD_URL };
     const parsed = JSON.parse(raw) as Partial<CloudSyncConfig>;
-    return { syncApiUrl: typeof parsed.syncApiUrl === 'string' ? parsed.syncApiUrl.trim() : '' };
+    return { syncApiUrl: normalizeCloudSyncUrl(parsed.syncApiUrl) };
   } catch {
-    return { syncApiUrl: '' };
+    return { syncApiUrl: SHARED_CLOUD_URL };
   }
 }
 
@@ -895,7 +906,7 @@ export function saveSyncConfig(config: CloudSyncConfig): void {
   try {
     localStorage.setItem(
       SYNC_CONFIG_KEY,
-      JSON.stringify({ syncApiUrl: config.syncApiUrl.trim() })
+      JSON.stringify({ syncApiUrl: normalizeCloudSyncUrl(config.syncApiUrl) })
     );
   } catch {
     // ignore storage quota errors
@@ -935,10 +946,171 @@ export function savePortalState(state: PortalState): void {
   }
 }
 
+function isRasterImageDataUrl(value: string | undefined): value is string {
+  return Boolean(
+    value &&
+      value.startsWith('data:image/') &&
+      !value.startsWith('data:image/svg+xml')
+  );
+}
+
+export async function compressDataUrlImage(
+  dataUrl: string,
+  maxWidth = 900,
+  quality = 0.72
+): Promise<string> {
+  if (!isRasterImageDataUrl(dataUrl) || typeof document === 'undefined') {
+    return dataUrl;
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const naturalWidth = img.naturalWidth || img.width;
+        const naturalHeight = img.naturalHeight || img.height;
+        if (!naturalWidth || !naturalHeight) {
+          resolve(dataUrl);
+          return;
+        }
+        const scale = naturalWidth > maxWidth ? maxWidth / naturalWidth : 1;
+        const targetWidth = Math.max(1, Math.round(naturalWidth * scale));
+        const targetHeight = Math.max(1, Math.round(naturalHeight * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+        const compressed = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressed.length < dataUrl.length ? compressed : dataUrl);
+      } catch {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+async function compressPortalImages(state: PortalState): Promise<PortalState> {
+  const [
+    yorpLogoUrl,
+    heroSlides,
+    aboutPhotos,
+    bulletinPosts,
+    officers,
+    programs,
+    lostFound,
+    tickets,
+  ] = await Promise.all([
+    compressDataUrlImage(state.yorpLogoUrl),
+    Promise.all(
+      state.heroSlides.map(async (slide) => ({
+        ...slide,
+        imageUrl: await compressDataUrlImage(slide.imageUrl),
+      }))
+    ),
+    Promise.all(
+      state.aboutPhotos.map(async (photo) => ({
+        ...photo,
+        url: await compressDataUrlImage(photo.url),
+      }))
+    ),
+    Promise.all(
+      state.bulletinPosts.map(async (post) => ({
+        ...post,
+        photoUrl: post.photoUrl ? await compressDataUrlImage(post.photoUrl) : post.photoUrl,
+      }))
+    ),
+    Promise.all(
+      state.officers.map(async (off) => ({
+        ...off,
+        photoUrl: off.photoUrl ? await compressDataUrlImage(off.photoUrl) : off.photoUrl,
+      }))
+    ),
+    Promise.all(
+      state.programs.map(async (prog) => ({
+        ...prog,
+        photos: await Promise.all(prog.photos.map((p) => compressDataUrlImage(p))),
+      }))
+    ),
+    Promise.all(
+      state.lostFound.map(async (lf) => ({
+        ...lf,
+        photoUrl: lf.photoUrl ? await compressDataUrlImage(lf.photoUrl) : lf.photoUrl,
+      }))
+    ),
+    Promise.all(
+      state.tickets.map(async (t) => ({
+        ...t,
+        facilityPhotos: await Promise.all(t.facilityPhotos.map((p) => compressDataUrlImage(p))),
+        evidenceFiles: t.evidenceFiles
+          ? await Promise.all(
+              t.evidenceFiles.map(async (ev) => ({
+                ...ev,
+                dataUrl: ev.mimeType.startsWith('image/')
+                  ? await compressDataUrlImage(ev.dataUrl)
+                  : ev.dataUrl,
+              }))
+            )
+          : t.evidenceFiles,
+      }))
+    ),
+  ]);
+
+  return {
+    ...state,
+    yorpLogoUrl,
+    heroSlides,
+    aboutPhotos,
+    bulletinPosts,
+    officers,
+    programs,
+    lostFound,
+    tickets,
+  };
+}
+
+function buildCloudWriteRequest(
+  targetUrl: string,
+  payloadState: PortalState
+): { method: 'PUT' | 'POST'; headers: Record<string, string>; body: string } {
+  const basePath = targetUrl.split('?')[0].toLowerCase();
+  const isFirebaseRtdb = basePath.endsWith('.json');
+  const isJsonBin = targetUrl.includes('api.jsonbin.io');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  if (isFirebaseRtdb || isJsonBin) {
+    return {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(payloadState),
+    };
+  }
+
+  const workerSecret =
+    typeof import.meta !== 'undefined' && import.meta.env?.VITE_CLOUD_SYNC_SECRET
+      ? String(import.meta.env.VITE_CLOUD_SYNC_SECRET).trim()
+      : '';
+  if (workerSecret) {
+    headers.Authorization = `Bearer ${workerSecret}`;
+  }
+
+  return {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payloadState),
+  };
+}
+
 function unwrapCloudPayload(raw: unknown): { state: Partial<PortalState> | null; updatedAt: string | null } {
   if (!raw || typeof raw !== 'object') return { state: null, updatedAt: null };
   const obj = raw as Record<string, unknown>;
-  // Handle JSONBin v3 `{ record: { ... } }` or `{ state: { ... }, updatedAt }` or direct PortalState
   if (obj.record && typeof obj.record === 'object') {
     const rec = obj.record as Record<string, unknown>;
     if (rec.state && typeof rec.state === 'object') {
@@ -956,7 +1128,7 @@ function unwrapCloudPayload(raw: unknown): { state: Partial<PortalState> | null;
       updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : null,
     };
   }
-  if ('schoolYear' in obj || 'printJobs' in obj || 'officers' in obj) {
+  if ('schoolYear' in obj || 'printJobs' in obj || 'officers' in obj || 'syncUrl' in obj) {
     return {
       state: obj as Partial<PortalState>,
       updatedAt: typeof obj.lastPublishedAt === 'string' ? obj.lastPublishedAt : null,
@@ -969,49 +1141,64 @@ export async function fetchFromCloud(syncApiUrl?: string): Promise<{
   state: PortalState | null;
   mode: SyncConnectionMode;
   updatedAt: string | null;
+  error?: string;
 }> {
-  const cleanExternalUrl = (syncApiUrl ?? loadSyncConfig().syncApiUrl).trim();
-  if (cleanExternalUrl) {
-    try {
-      const res = await fetch(cleanExternalUrl, { method: 'GET' });
-      if (res.ok) {
-        const data = (await res.json()) as unknown;
-        const unwrapped = unwrapCloudPayload(data);
-        if (unwrapped.state) {
-          const normalized = normalizePortalState(unwrapped.state);
-          savePortalState(normalized);
-          return { state: normalized, mode: 'cloud', updatedAt: unwrapped.updatedAt };
-        }
-      }
-    } catch {
-      // Fallback to shared Node server endpoint
-    }
-  }
+  const targetUrl = normalizeCloudSyncUrl(syncApiUrl ?? loadSyncConfig().syncApiUrl);
+  const cacheBustedUrl = `${targetUrl}${targetUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
 
   try {
-    const res = await fetch(buildApiUrl('/api/portal/state'), { method: 'GET' });
-    const ct = res.headers.get('content-type') || '';
-    if (res.ok && ct.includes('application/json')) {
-      const data = (await res.json()) as {
-        state?: Partial<PortalState> | null;
-        updatedAt?: string | null;
-      };
-      if (data.state && typeof data.state === 'object') {
-        const normalized = normalizePortalState(data.state);
+    const res = await fetch(cacheBustedUrl, { method: 'GET', cache: 'no-store' });
+    if (res.ok) {
+      const data = (await res.json()) as unknown;
+      const unwrapped = unwrapCloudPayload(data);
+      if (unwrapped.state) {
+        const normalized = normalizePortalState({
+          ...unwrapped.state,
+          syncUrl: targetUrl,
+        });
         savePortalState(normalized);
-        return {
-          state: normalized,
-          mode: 'server',
-          updatedAt: data.updatedAt || normalized.lastPublishedAt || null,
-        };
+        return { state: normalized, mode: 'cloud', updatedAt: unwrapped.updatedAt };
       }
-      return { state: null, mode: 'server', updatedAt: null };
+      // Endpoint reachable but database is currently empty (`null`)
+      return { state: null, mode: 'cloud', updatedAt: null };
     }
-  } catch {
-    // Static host or offline preview fallback
+  } catch (err) {
+    // Fall through to optional shared Node server check below
+    const networkMsg = err instanceof Error ? err.message : 'Unable to reach cloud database.';
+    try {
+      const res = await fetch(buildApiUrl('/api/portal/state'), {
+        method: 'GET',
+        cache: 'no-store',
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const data = (await res.json()) as {
+          state?: Partial<PortalState> | null;
+          updatedAt?: string | null;
+        };
+        if (data.state && typeof data.state === 'object') {
+          const normalized = normalizePortalState(data.state);
+          savePortalState(normalized);
+          return {
+            state: normalized,
+            mode: 'server',
+            updatedAt: data.updatedAt || normalized.lastPublishedAt || null,
+          };
+        }
+        return { state: null, mode: 'server', updatedAt: null };
+      }
+    } catch {
+      return { state: null, mode: 'local', updatedAt: null, error: networkMsg };
+    }
+    return { state: null, mode: 'local', updatedAt: null, error: networkMsg };
   }
 
-  return { state: null, mode: 'local', updatedAt: null };
+  return {
+    state: null,
+    mode: 'local',
+    updatedAt: null,
+    error: `Cloud database at ${targetUrl} could not be loaded.`,
+  };
 }
 
 export async function publishToCloud(
@@ -1022,41 +1209,43 @@ export async function publishToCloud(
   ok: boolean;
   mode: SyncConnectionMode;
   updatedAt: string;
+  publishedState?: PortalState;
   error?: string;
 }> {
+  const targetUrl = normalizeCloudSyncUrl(syncApiUrl ?? state.syncUrl ?? loadSyncConfig().syncApiUrl);
   const publishedAt = new Date().toISOString();
+  const compressed = await compressPortalImages(state);
   const payloadState: PortalState = {
-    ...state,
+    ...compressed,
+    syncUrl: targetUrl,
     lastPublishedAt: publishedAt,
   };
   savePortalState(payloadState);
 
-  const cleanExternalUrl = (syncApiUrl ?? loadSyncConfig().syncApiUrl).trim();
   let cloudSynced = false;
-  let serverSynced = false;
   let lastError: string | undefined;
 
-  if (cleanExternalUrl) {
-    try {
-      const isJsonBin = cleanExternalUrl.includes('api.jsonbin.io');
-      const res = await fetch(cleanExternalUrl, {
-        method: isJsonBin ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloadState),
-      });
-      if (res.ok) {
-        cloudSynced = true;
-      } else {
-        lastError = `External Cloud Sync returned status ${res.status}.`;
-      }
-    } catch {
-      lastError = 'External Cloud Sync endpoint could not be reached.';
+  try {
+    const reqInit = buildCloudWriteRequest(targetUrl, payloadState);
+    const res = await fetch(targetUrl, {
+      method: reqInit.method,
+      headers: reqInit.headers,
+      body: reqInit.body,
+    });
+    if (res.ok) {
+      cloudSynced = true;
+    } else {
+      const detail = await res.text().catch(() => '');
+      lastError = `Cloud Sync HTTP ${res.status}${detail ? `: ${detail.slice(0, 120)}` : ''}`;
     }
+  } catch (err) {
+    lastError =
+      err instanceof Error ? `Network error: ${err.message}` : 'Network error reaching Live Cloud URL.';
   }
 
   if (authToken) {
     try {
-      const res = await fetch(buildApiUrl('/api/portal/state'), {
+      await fetch(buildApiUrl('/api/portal/state'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1064,30 +1253,26 @@ export async function publishToCloud(
         },
         body: JSON.stringify({ state: payloadState }),
       });
-      if (res.ok) {
-        serverSynced = true;
-      } else if (!cloudSynced) {
-        const errPayload = (await res.json().catch(() => null)) as { error?: string } | null;
-        if (res.status === 401 || res.status === 403) {
-          lastError = errPayload?.error || 'Session expired. Please sign in again to publish.';
-        }
-      }
     } catch {
-      // Static preview fallback cleanly handled below
+      // Optional local Node mirror failed cleanly
     }
   }
 
   if (cloudSynced) {
-    return { ok: true, mode: 'cloud', updatedAt: publishedAt };
+    return {
+      ok: true,
+      mode: 'cloud',
+      updatedAt: publishedAt,
+      publishedState: payloadState,
+    };
   }
-  if (serverSynced) {
-    return { ok: true, mode: 'server', updatedAt: publishedAt };
-  }
+
   return {
     ok: false,
     mode: 'local',
     updatedAt: publishedAt,
-    error: lastError,
+    publishedState: payloadState,
+    error: lastError || 'Unable to publish to live cloud endpoint.',
   };
 }
 
@@ -1096,11 +1281,35 @@ export async function submitPublicItemToCloud(
   item: PrintRequestJob | LostFoundItem | GrievanceTicket,
   updatedLocalState: PortalState,
   syncApiUrl?: string
-): Promise<{ synced: boolean; mode: SyncConnectionMode }> {
-  savePortalState(updatedLocalState);
+): Promise<{ synced: boolean; mode: SyncConnectionMode; error?: string }> {
+  const compressedState = await compressPortalImages({
+    ...updatedLocalState,
+    syncUrl: normalizeCloudSyncUrl(syncApiUrl ?? updatedLocalState.syncUrl),
+    lastPublishedAt: new Date().toISOString(),
+  });
+  savePortalState(compressedState);
 
   let synced = false;
   let mode: SyncConnectionMode = 'local';
+  let error: string | undefined;
+
+  const targetUrl = normalizeCloudSyncUrl(syncApiUrl ?? loadSyncConfig().syncApiUrl);
+  try {
+    const reqInit = buildCloudWriteRequest(targetUrl, compressedState);
+    const res = await fetch(targetUrl, {
+      method: reqInit.method,
+      headers: reqInit.headers,
+      body: reqInit.body,
+    });
+    if (res.ok) {
+      synced = true;
+      mode = 'cloud';
+    } else {
+      error = `Cloud Sync HTTP ${res.status}`;
+    }
+  } catch (err) {
+    error = err instanceof Error ? err.message : 'Unable to reach Live Cloud URL.';
+  }
 
   try {
     const res = await fetch(buildApiUrl(`/api/portal/${kind}`), {
@@ -1108,7 +1317,7 @@ export async function submitPublicItemToCloud(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ item }),
     });
-    if (res.ok) {
+    if (res.ok && !synced) {
       synced = true;
       mode = 'server';
     }
@@ -1116,25 +1325,7 @@ export async function submitPublicItemToCloud(
     // ignore if static host
   }
 
-  const cleanExternalUrl = (syncApiUrl ?? loadSyncConfig().syncApiUrl).trim();
-  if (cleanExternalUrl) {
-    try {
-      const isJsonBin = cleanExternalUrl.includes('api.jsonbin.io');
-      const res = await fetch(cleanExternalUrl, {
-        method: isJsonBin ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedLocalState),
-      });
-      if (res.ok) {
-        synced = true;
-        mode = 'cloud';
-      }
-    } catch {
-      // ignore external failure cleanly
-    }
-  }
-
-  return { synced, mode };
+  return { synced, mode, error };
 }
 
 export function exportPortalSnapshotJson(state: PortalState): string {
@@ -1180,13 +1371,9 @@ export function getActiveSyncEndpointInfo(): {
   endpoint: string;
   isExternalCloud: boolean;
 } {
-  const custom = loadSyncConfig().syncApiUrl.trim();
-  if (custom) {
-    return { endpoint: custom, isExternalCloud: true };
-  }
   return {
-    endpoint: buildApiUrl('/api/portal/state'),
-    isExternalCloud: false,
+    endpoint: loadSyncConfig().syncApiUrl,
+    isExternalCloud: true,
   };
 }
 
@@ -1198,12 +1385,12 @@ export async function pingCloudEndpoint(): Promise<{
   statusCode?: number;
   error?: string;
 }> {
-  const { endpoint, isExternalCloud } = getActiveSyncEndpointInfo();
+  const { endpoint } = getActiveSyncEndpointInfo();
   const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const targetPingUrl = isExternalCloud ? endpoint : buildApiUrl('/api/health');
+  const targetPingUrl = `${endpoint}${endpoint.includes('?') ? '&' : '?'}t=${Date.now()}`;
 
   try {
-    const res = await fetch(targetPingUrl, { method: 'GET' });
+    const res = await fetch(targetPingUrl, { method: 'GET', cache: 'no-store' });
     const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const latencyMs = Math.max(1, Math.round(endedAt - startedAt));
     if (res.ok) {
@@ -1211,7 +1398,7 @@ export async function pingCloudEndpoint(): Promise<{
         ok: true,
         endpoint,
         latencyMs,
-        mode: isExternalCloud ? 'cloud' : 'server',
+        mode: 'cloud',
         statusCode: res.status,
       };
     }

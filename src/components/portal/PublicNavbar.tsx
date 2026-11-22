@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Lock, Menu, Sparkles, X } from 'lucide-react';
+import { Lock, Menu, RefreshCw, Sparkles, X } from 'lucide-react';
 import type { PortalSectionId } from '../../lib/portalStore.ts';
 import { NNCHSSchoolSeal, SSLGCrest } from '../SSLGCrest.tsx';
 import { ThemeToggle, type ThemeMode } from '../ThemeToggle.tsx';
@@ -57,6 +57,8 @@ export function PublicNavbar({
   onNavigate,
   onOpenHub,
   onOpenWelcome,
+  onSyncLatest,
+  syncing = false,
   isAuthenticated,
 }: {
   schoolYear: string;
@@ -66,6 +68,8 @@ export function PublicNavbar({
   onNavigate: (target: PortalJumpTarget) => void;
   onOpenHub: () => void;
   onOpenWelcome: () => void;
+  onSyncLatest?: () => void;
+  syncing?: boolean;
   isAuthenticated: boolean;
 }) {
   const manilaClock = useManilaClock();
@@ -138,8 +142,22 @@ export function PublicNavbar({
             })}
           </nav>
 
-          {/* Right Controls: Welcome Banner + Theme Switcher + Admin Portal CTA */}
+          {/* Right Controls: Sync Latest + Welcome Banner + Theme Switcher + Admin Portal CTA */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {onSyncLatest && (
+              <button
+                type="button"
+                disabled={syncing}
+                onClick={onSyncLatest}
+                title="Sync Latest Published Updates"
+                className="hidden lg:inline-flex px-2.5 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-blue-950 dark:text-[#fde047] border border-blue-200 dark:border-slate-700 text-xs font-extrabold items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
+                <span className="hidden 2xl:inline">{syncing ? 'Syncing...' : 'Sync Latest'}</span>
+                <span className="2xl:hidden">Sync</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onOpenWelcome}
@@ -205,7 +223,22 @@ export function PublicNavbar({
               ))}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {onSyncLatest && (
+                <button
+                  type="button"
+                  disabled={syncing}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onSyncLatest();
+                  }}
+                  className="w-full py-2.5 px-4 rounded-xl bg-blue-50 dark:bg-slate-800 hover:bg-blue-100 dark:hover:bg-slate-700 text-blue-950 dark:text-[#fde047] border border-blue-200 dark:border-slate-700 text-xs font-extrabold inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+                  <span>{syncing ? 'Syncing...' : 'Sync Latest'}</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
