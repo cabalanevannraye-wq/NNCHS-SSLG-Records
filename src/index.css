@@ -1,6 +1,11 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     font-family: "Public Sans", -apple-system, BlinkMacSystemFont, sans-serif;
   }
@@ -19,6 +24,34 @@
   font-variant-numeric: tabular-nums;
 }
 
+@keyframes sslg-ticker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-sslg-ticker {
+  display: inline-flex;
+  width: max-content;
+  animation: sslg-ticker 42s linear infinite;
+}
+
+.animate-sslg-ticker:hover {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .animate-sslg-ticker {
+    animation: none;
+  }
+}
+
 @media print {
   body {
     background: #ffffff !important;
@@ -31,6 +64,16 @@
 
   .print-only {
     display: block !important;
+  }
+
+  .letterhead-print-surface {
+    position: static !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
   }
 
   @page {

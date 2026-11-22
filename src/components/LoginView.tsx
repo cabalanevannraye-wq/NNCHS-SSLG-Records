@@ -31,9 +31,14 @@ interface LoginViewProps {
     email: string;
   } | null;
   onClearBlockState?: () => void;
+  onReturnToPortal?: () => void;
 }
 
-export function LoginView({ authBlockState, onClearBlockState }: LoginViewProps) {
+export function LoginView({
+  authBlockState,
+  onClearBlockState,
+  onReturnToPortal,
+}: LoginViewProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -141,18 +146,31 @@ export function LoginView({ authBlockState, onClearBlockState }: LoginViewProps)
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 sm:p-6">
-      <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-sm p-8 sm:p-10">
+    <div className="min-h-screen bg-[#f8fafc] dark:bg-[#0b1120] flex flex-col items-center justify-center p-4 sm:p-6">
+      <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-lg p-8 sm:p-10">
+        {onReturnToPortal && (
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={onReturnToPortal}
+              className="text-xs font-bold text-blue-800 dark:text-blue-400 hover:underline cursor-pointer"
+            >
+              ← Return to NNCHS SSLG Public Portal
+            </button>
+          </div>
+        )}
         <div className="flex flex-col items-center text-center mb-8">
           <SSLGCrest className="w-20 h-20 mb-4" />
-          <h1 className="text-2xl font-bold tracking-tight text-slate-950">SSLG Records</h1>
-          <p className="text-xs font-medium text-slate-500 mt-1">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-950 dark:text-white">
+            SSLG Hub / Records Portal
+          </h1>
+          <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-1">
             NNCHS · Supreme Secondary Learner Government
           </p>
         </div>
 
         {error && (
-          <div className="mb-5 p-3 rounded-lg bg-rose-50 border border-rose-200 text-sm font-medium text-rose-800">
+          <div className="mb-5 p-3 rounded-lg bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-sm font-medium text-rose-800 dark:text-rose-200">
             {error}
           </div>
         )}
@@ -212,7 +230,7 @@ export function LoginView({ authBlockState, onClearBlockState }: LoginViewProps)
               <div>
                 <label
                   htmlFor="login-username"
-                  className="block text-xs font-semibold text-slate-700 mb-1.5"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5"
                 >
                   Username
                 </label>
@@ -226,7 +244,7 @@ export function LoginView({ authBlockState, onClearBlockState }: LoginViewProps)
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="Enter username"
-                    className="w-full pl-10 pr-3.5 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-800 focus:border-blue-800"
+                    className="w-full pl-10 pr-3.5 py-2.5 text-sm border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-800 focus:border-blue-800"
                   />
                 </div>
               </div>
@@ -234,7 +252,7 @@ export function LoginView({ authBlockState, onClearBlockState }: LoginViewProps)
               <div>
                 <label
                   htmlFor="login-password"
-                  className="block text-xs font-semibold text-slate-700 mb-1.5"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5"
                 >
                   Password
                 </label>
@@ -248,13 +266,13 @@ export function LoginView({ authBlockState, onClearBlockState }: LoginViewProps)
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter password"
-                    className="w-full pl-10 pr-10 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-800 focus:border-blue-800"
+                    className="w-full pl-10 pr-10 py-2.5 text-sm border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-800 focus:border-blue-800"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    className="absolute right-3 top-2.5 p-0.5 text-slate-400 hover:text-slate-700 cursor-pointer"
+                    className="absolute right-3 top-2.5 p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -264,18 +282,18 @@ export function LoginView({ authBlockState, onClearBlockState }: LoginViewProps)
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 px-4 bg-slate-950 hover:bg-blue-900 text-white font-semibold text-sm rounded-lg transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
+                className="w-full py-3 px-4 bg-[#1e3a8a] hover:bg-slate-950 dark:bg-blue-600 dark:hover:bg-blue-500 text-white font-semibold text-sm rounded-lg transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
               >
-                <span>{loading ? 'Signing in...' : 'Sign In'}</span>
+                <span>{loading ? 'Signing in...' : 'Sign In to SSLG Hub'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </form>
 
-            <div className="pt-2 border-t border-slate-100 text-center">
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-center">
               <button
                 type="button"
                 onClick={() => setShowAdminSetup((v) => !v)}
-                className="text-xs font-medium text-slate-500 hover:text-slate-800 cursor-pointer"
+                className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
               >
                 {showAdminSetup
                   ? 'Hide setup options'
@@ -283,8 +301,8 @@ export function LoginView({ authBlockState, onClearBlockState }: LoginViewProps)
               </button>
 
               {showAdminSetup && (
-                <div className="mt-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-left space-y-2.5">
-                  <p className="text-[11px] text-slate-600 leading-relaxed">
+                <div className="mt-3 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 text-left space-y-2.5">
+                  <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
                     If you are the SSLG President (Admin) and have not set a password yet, verify
                     your Admin Google account once to set your password and create officer/club
                     usernames.
@@ -294,16 +312,16 @@ export function LoginView({ authBlockState, onClearBlockState }: LoginViewProps)
                       type="button"
                       disabled={loading}
                       onClick={handleAdminGoogleVerify}
-                      className="w-full py-2 px-3 bg-white hover:bg-slate-100 text-slate-900 border border-slate-300 font-semibold text-xs rounded-lg inline-flex items-center justify-center gap-2 cursor-pointer"
+                      className="w-full py-2 px-3 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 font-semibold text-xs rounded-lg inline-flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      <KeyRound className="w-3.5 h-3.5 text-blue-800" />
+                      <KeyRound className="w-3.5 h-3.5 text-blue-800 dark:text-blue-400" />
                       <span>Verify Admin via Google &amp; Set Password</span>
                     </button>
                     <button
                       type="button"
                       disabled={loading}
                       onClick={handleSendPasswordReset}
-                      className="w-full py-1.5 text-[11px] font-medium text-blue-800 hover:underline cursor-pointer"
+                      className="w-full py-1.5 text-[11px] font-medium text-blue-800 dark:text-blue-400 hover:underline cursor-pointer"
                     >
                       Send password reset email (if using email username)
                     </button>
@@ -314,7 +332,7 @@ export function LoginView({ authBlockState, onClearBlockState }: LoginViewProps)
           </div>
         )}
 
-        <p className="mt-6 text-center text-xs text-slate-400">
+        <p className="mt-6 text-center text-xs text-slate-400 dark:text-slate-500">
           Authorized SSLG Officers &amp; School Clubs only. Accounts are created by the SSLG
           President (Admin).
         </p>
