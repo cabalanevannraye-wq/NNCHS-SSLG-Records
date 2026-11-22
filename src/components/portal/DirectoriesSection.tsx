@@ -57,13 +57,13 @@ export function DirectoriesSection({
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-yellow-300">
-            Student Leadership &amp; Organizations · SY {portal.schoolYear}
+            Learner Leadership &amp; Organizations · SY {portal.schoolYear}
           </p>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-blue-950 dark:text-white tracking-tight">
             SSLG Officers &amp; Registered Clubs Directory
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-            Connect directly with your elected NNCHS SSLG Officers and recognized student
+            Connect directly with your elected NNCHS SSLG Officers and recognized learner
             organizations across campus.
           </p>
         </div>
@@ -95,7 +95,7 @@ export function DirectoriesSection({
       </div>
 
       {/* Search & Filter Row */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-4 flex flex-col sm:flex-row gap-3">
+      <div className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-4 flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
           <input
@@ -148,7 +148,7 @@ export function DirectoriesSection({
           {filteredOfficers.map((officer) => (
             <article
               key={officer.id}
-              className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-5 flex flex-col justify-between space-y-4 hover:border-blue-400 dark:hover:border-blue-600 transition-colors"
+              className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-5 flex flex-col justify-between space-y-4 hover:border-blue-400 dark:hover:border-yellow-300 transition-colors"
             >
               <div className="space-y-3">
                 <div className="flex items-center gap-3.5">
@@ -202,7 +202,7 @@ export function DirectoriesSection({
           {filteredClubs.map((club) => (
             <article
               key={club.id}
-              className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-5 flex flex-col justify-between space-y-4 hover:border-blue-400 dark:hover:border-blue-600 transition-colors"
+              className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-5 flex flex-col justify-between space-y-4 hover:border-blue-400 dark:hover:border-yellow-300 transition-colors"
             >
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between text-xs font-semibold">

@@ -265,7 +265,7 @@ export function ProgramsCalendarSection({
               {filteredLostFound.map((item) => (
                 <article
                   key={item.id}
-                  className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 overflow-hidden flex flex-col justify-between"
+                  className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm overflow-hidden flex flex-col justify-between"
                 >
                   {item.photoUrl && (
                     <img
@@ -303,7 +303,7 @@ export function ProgramsCalendarSection({
           </div>
 
           {/* Public Submission Form */}
-          <div className="lg:col-span-5 bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 space-y-4">
+          <div className="lg:col-span-5 backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 space-y-4">
             <h3 className="text-base font-extrabold text-blue-950 dark:text-white flex items-center gap-2">
               <PackageSearch className="w-5 h-5 text-blue-700 dark:text-[#fde047]" />
               <span>Post Lost or Found Item</span>
@@ -428,7 +428,7 @@ export function ProgramsCalendarSection({
       </div>
 
       {/* 3. SSLG ACTIVITY CALENDAR */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 space-y-5">
+      <div className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-[#fde047]">

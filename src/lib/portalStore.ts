@@ -1,6 +1,23 @@
-export const PORTAL_STORAGE_KEY = 'nnchs_sslg_portal_v2';
+import { buildApiUrl } from './api.ts';
+
+export const PORTAL_STORAGE_KEY = 'nnchs_sslg_shared_state_v1';
+export const LEGACY_PORTAL_STORAGE_KEY = 'nnchs_sslg_portal_v2';
+export const SYNC_CONFIG_KEY = 'nnchs_sslg_sync_config_v1';
 export const THEME_STORAGE_KEY = 'nnchs_sslg_theme';
 export const DEFAULT_YORP_LOGO_PATH = '/assets/aistudio/image_582ebce5.png';
+export const NNCHS_SCHOOL_LOGO_PATH = '/assets/aistudio/nnchs-logo_4218aa21.jpg';
+
+export type SyncConnectionMode = 'cloud' | 'server' | 'local';
+
+export interface CloudSyncConfig {
+  syncApiUrl: string;
+}
+
+export interface AboutPhotoItem {
+  id: string;
+  url: string;
+  caption: string;
+}
 
 export type PortalSectionId =
   | 'home'
@@ -63,10 +80,10 @@ export interface PublicClub {
 }
 
 export const PRINT_TIMELINE_STEPS = [
-  'Request Submitted',
-  'Reviewing File',
-  'Printing in Progress',
-  'Ready for Pickup at SSLG Office',
+  'Submitted',
+  'Reviewing',
+  'Printing',
+  'Ready for Pickup',
   'Claimed',
 ] as const;
 
@@ -188,6 +205,7 @@ export interface PortalState {
   tickerMessages: string[];
   heroSlides: HeroSlide[];
   yorpLogoUrl: string;
+  aboutPhotos: AboutPhotoItem[];
   impactStats: ImpactStatItem[];
   messengerGroupUrl: string;
   bulletinPosts: BulletinPost[];
@@ -201,6 +219,7 @@ export interface PortalState {
   funds: FundAllocationItem[];
   resolutions: LegislativeRecord[];
   learnerServicesContact: LearnerServicesContact;
+  lastPublishedAt?: string;
 }
 
 function makeGeometricSlideDataUri(
@@ -247,9 +266,9 @@ function makeProgramPhotoSvg(title: string, badge: string): string {
 export const DEFAULT_PORTAL_STATE: PortalState = {
   schoolYear: '2026–2027',
   campusAdvisory:
-    'Project ‘Free Printing’ for all Learners accepts Black & White and Colored Print files at the SSLG Office (Room 104). Submit files online and track your dot timeline anytime.',
+    'Project ‘Free Printing’ for all Learners accepts Black & White and Colored Print files at the SSLG Office (Room 104). Submit files online and follow your live Status Tracker anytime.',
   tickerMessages: [
-    'PROJECT ‘FREE PRINTING’ FOR ALL LEARNERS: Black & White and Colored printing accepted — upload your file directly and track status with your PRT Code.',
+    'PROJECT ‘FREE PRINTING’ FOR ALL LEARNERS: Black & White and Colored printing accepted — upload your file directly and follow your PRT Code Request Progress.',
     'NYC YORP REGISTERED YOUTH ORGANIZATION: NNCHS SSLG champions Health, Education, Economic Empowerment, Social Inclusion, Peace Building, Governance & Active Leadership.',
     'OFFICIAL SSLG UPDATES: Join the NNCHS SSLG Updates Messenger Group from our Bulletin Board for real-time school advisories.',
   ],
@@ -258,16 +277,16 @@ export const DEFAULT_PORTAL_STATE: PortalState = {
       id: 'slide-1',
       title: 'Serving Every Compre Learner Through Transparent Leadership',
       caption:
-        'Official digital hub of the Nabunturan National Comprehensive High School — Supreme Secondary Learner Government.',
+        'Official digital portal of the Nabunturan National Comprehensive High School — Supreme Secondary Learner Government.',
       ctaLabel: "Project 'Free Printing'",
       ctaSection: 'printing',
-      imageUrl: makeGeometricSlideDataUri('NNCHS SSLG Student Leadership', 'SY 2026–2027 · OFFICIAL PORTAL', 'navy'),
+      imageUrl: makeGeometricSlideDataUri('NNCHS SSLG Learner Leadership', 'SY 2026–2027 · OFFICIAL PORTAL', 'navy'),
     },
     {
       id: 'slide-2',
       title: "Project 'Free Printing' for all Learners",
       caption:
-        'Upload PDF, DOCX, PPTX, or image files—both Black & White and Colored Print accepted—and follow your live dot-timeline status.',
+        'Upload PDF, DOCX, PPTX, or image files—both Black & White and Colored Print accepted—and follow your live Status Tracker.',
       ctaLabel: 'Request Free Print',
       ctaSection: 'printing',
       imageUrl: makeGeometricSlideDataUri("Project 'Free Printing'", 'B&W & COLORED PRINT SUPPORT', 'royal'),
@@ -283,6 +302,28 @@ export const DEFAULT_PORTAL_STATE: PortalState = {
     },
   ],
   yorpLogoUrl: DEFAULT_YORP_LOGO_PATH,
+  aboutPhotos: [
+    {
+      id: 'about-photo-1',
+      url: NNCHS_SCHOOL_LOGO_PATH,
+      caption: 'Nabunturan National Comprehensive High School Official Seal',
+    },
+    {
+      id: 'about-photo-2',
+      url: makeProgramPhotoSvg('SSLG General Assembly', 'LEARNER GOVERNANCE · SY 2026–2027'),
+      caption: 'Compre Learner Leaders Assembly & Policy Consultation',
+    },
+    {
+      id: 'about-photo-3',
+      url: makeProgramPhotoSvg('YORP Advocacy Initiatives', 'NATIONAL YOUTH COMMISSION ACCREDITED'),
+      caption: 'NYC YORP Registered Youth Organization Programs',
+    },
+    {
+      id: 'about-photo-4',
+      url: makeProgramPhotoSvg("Project 'Free Printing'", 'ROOM 104 LEARNER SUPPORT DESK'),
+      caption: 'Project Free Printing Academic Support Operations',
+    },
+  ],
   impactStats: [
     { id: 'stat-1', label: 'Recognized Clubs & Organizations', value: 9 },
     { id: 'stat-2', label: 'Programs & Initiatives', value: 18 },
@@ -298,9 +339,9 @@ export const DEFAULT_PORTAL_STATE: PortalState = {
       publishedAt: '2026-11-21',
       author: 'Office of the SSLG Secretariat',
       summary:
-        'Learners may now specify exact copy counts, choose Black & White or Colored Print, upload files directly, and follow live dot-timeline tracking.',
+        'Learners may now specify exact copy counts, choose Black & White or Colored Print, upload files directly, and follow live Status Tracker progress.',
       fullBody:
-        'Pursuant to SSLG Resolution No. 2026-04, Project ‘Free Printing’ for all Learners has been upgraded to accept both Black & White and Colored academic files directly on the NNCHS SSLG Website.\n\nUpload your PDF, Word document, presentation, or image file cleanly on the Free Printing tab, save your generated PRT-2026 tracking code, and track every stage through our connected 5-dot timeline.',
+        'Pursuant to SSLG Resolution No. 2026-04, Project ‘Free Printing’ for all Learners has been upgraded to accept both Black & White and Colored academic files directly on the NNCHS SSLG Website.\n\nUpload your PDF, Word document, presentation, or image file cleanly on the Free Printing tab, save your generated PRT-2026 tracking code, and monitor every step from Submitted to Claimed.',
       facebookPostUrl: 'https://www.facebook.com/nnchssslg.official',
       featured: true,
     },
@@ -484,7 +525,7 @@ export const DEFAULT_PORTAL_STATE: PortalState = {
       fileSize: 284000,
       fileLink: 'https://drive.google.com',
       notes: 'Back-to-back if possible for thesis draft checking.',
-      status: 'Ready for Pickup at SSLG Office',
+      status: 'Ready for Pickup',
       submittedAt: '2026-11-21T08:15:00+08:00',
       adminNotes: 'Printed 2 clean copies. Ready at Room 104 counter.',
     },
@@ -499,7 +540,7 @@ export const DEFAULT_PORTAL_STATE: PortalState = {
       fileMimeType: 'image/png',
       fileSize: 192000,
       notes: 'Colored print for Science classroom visual aid.',
-      status: 'Printing in Progress',
+      status: 'Printing',
       submittedAt: '2026-11-21T09:40:00+08:00',
       adminNotes: 'Queued for color inkjet print.',
     },
@@ -513,7 +554,7 @@ export const DEFAULT_PORTAL_STATE: PortalState = {
       targetDate: '2027-03-31',
       venue: 'SSLG Office · Room 104',
       summary:
-        'Provides free Black & White and Colored academic printing for Compre students with direct file upload and live dot-timeline tracking.',
+        'Provides free Black & White and Colored academic printing for Compre learners with direct file upload and live Status Tracker progress.',
       photos: [
         makeProgramPhotoSvg("Project 'Free Printing'", 'EDUCATION & LEARNER SUPPORT'),
         makeProgramPhotoSvg('Room 104 Print Station', 'BLACK & WHITE · COLORED ACCEPTED'),
@@ -633,7 +674,7 @@ export const DEFAULT_PORTAL_STATE: PortalState = {
       timeRange: '8:00 AM – 4:30 PM',
       category: 'Division/District Events',
       venue: 'NNCHS Gymnasium',
-      description: 'Student governance workshops and NYC YORP advocacy planning.',
+      description: 'Learner Governance workshops and NYC YORP advocacy planning.',
     },
   ],
   funds: [
@@ -674,7 +715,7 @@ export const DEFAULT_PORTAL_STATE: PortalState = {
       datePassed: '2026-09-18',
       sponsor: 'Sec. Jethro Paul Alcaraz & Treas. Hannah Grace Dela Cruz',
       summary:
-        'Establishes free academic printing for Compre learners supporting both Black & White and Colored printouts with dot-timeline tracking.',
+        'Establishes free academic printing for Compre learners supporting both Black & White and Colored printouts with Status Tracker progress.',
       fullText: `NABUNTURAN NATIONAL COMPREHENSIVE HIGH SCHOOL
 SUPREME SECONDARY LEARNER GOVERNMENT (NNCHS SSLG)
 
@@ -687,7 +728,7 @@ WHEREAS, the NNCHS SSLG is committed to reducing academic expenses for every Com
 
 NOW, THEREFORE, BE IT RESOLVED AS IT IS HEREBY RESOLVED, that the NNCHS SSLG operates Project 'Free Printing' for all Learners at Room 104, accepting both Black & White and Colored Print requests via direct file upload on the Official SSLG Website.
 
-RESOLVED FURTHER, that learners shall receive a unique Tracking Code with live dot-to-dot timeline progress until pickup.
+RESOLVED FURTHER, that learners shall receive a unique Tracking Code with live Request Progress updates until pickup.
 
 APPROVED UNANIMOUSLY this 18th day of September 2026.
 Signed: Evann Raye Cabalan, SSLG President
@@ -709,14 +750,14 @@ SSLG RESOLUTION NO. 2026-05 (Series of 2026)
 A RESOLUTION INSTITUTIONALIZING THE GUIDED STUDENT WELFARE AND CAMPUS FACILITIES REPORTING SYSTEM
 
 Section 1. Guided Welfare Intake. Student Welfare and Anti-Bullying reports shall remain confidential and guide learners to describe what happened, who was involved, and what immediate support is needed, alongside class adviser and Learner Formation Officer coordination.
-Section 2. Public Moderation. Only reports expressly approved by the SSLG Executive Council may appear on the public feed to safeguard student privacy.
+Section 2. Public Moderation. Only reports expressly approved by the SSLG Executive Council may appear on the public feed to safeguard learner privacy.
 
 APPROVED this 2nd day of October 2026.`,
     },
     {
       id: 'res-3',
       numberCode: 'Resolution No. 2026-06',
-      title: 'Aligning Annual Student Programs with the Seven NYC YORP Advocacy Pillars',
+      title: 'Aligning Annual Learner Programs with the Seven NYC YORP Advocacy Pillars',
       datePassed: '2026-11-06',
       sponsor: 'VP Clarisse Anne Mendoza',
       summary:
@@ -742,22 +783,82 @@ Passed November 6, 2026.`,
   },
 };
 
+export function normalizePrintStatus(raw: string | undefined): PrintJobStatus {
+  if (!raw) return 'Submitted';
+  if ((PRINT_TIMELINE_STEPS as readonly string[]).includes(raw)) {
+    return raw as PrintJobStatus;
+  }
+  const map: Record<string, PrintJobStatus> = {
+    'Request Submitted': 'Submitted',
+    'Reviewing File': 'Reviewing',
+    'Printing in Progress': 'Printing',
+    'Ready for Pickup at SSLG Office': 'Ready for Pickup',
+  };
+  return map[raw] || 'Submitted';
+}
+
+export function normalizePortalState(parsed: Partial<PortalState> | null | undefined): PortalState {
+  if (!parsed || typeof parsed !== 'object') {
+    return DEFAULT_PORTAL_STATE;
+  }
+  const normalizedJobs = Array.isArray(parsed.printJobs)
+    ? parsed.printJobs.map((job) => ({
+        ...job,
+        status: normalizePrintStatus(job?.status),
+      }))
+    : DEFAULT_PORTAL_STATE.printJobs;
+
+  return {
+    ...DEFAULT_PORTAL_STATE,
+    ...parsed,
+    aboutPhotos:
+      Array.isArray(parsed.aboutPhotos) && parsed.aboutPhotos.length > 0
+        ? parsed.aboutPhotos
+        : DEFAULT_PORTAL_STATE.aboutPhotos,
+    printJobs: normalizedJobs,
+    learnerServicesContact: {
+      ...DEFAULT_PORTAL_STATE.learnerServicesContact,
+      ...(parsed.learnerServicesContact || {}),
+    },
+  };
+}
+
+export function loadSyncConfig(): CloudSyncConfig {
+  try {
+    const raw = localStorage.getItem(SYNC_CONFIG_KEY);
+    if (!raw) return { syncApiUrl: '' };
+    const parsed = JSON.parse(raw) as Partial<CloudSyncConfig>;
+    return { syncApiUrl: typeof parsed.syncApiUrl === 'string' ? parsed.syncApiUrl.trim() : '' };
+  } catch {
+    return { syncApiUrl: '' };
+  }
+}
+
+export function saveSyncConfig(config: CloudSyncConfig): void {
+  try {
+    localStorage.setItem(
+      SYNC_CONFIG_KEY,
+      JSON.stringify({ syncApiUrl: config.syncApiUrl.trim() })
+    );
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
 export function loadPortalState(): PortalState {
   try {
-    const raw = localStorage.getItem(PORTAL_STORAGE_KEY);
+    let raw = localStorage.getItem(PORTAL_STORAGE_KEY);
+    if (!raw) {
+      raw = localStorage.getItem(LEGACY_PORTAL_STORAGE_KEY);
+    }
     if (!raw) {
       localStorage.setItem(PORTAL_STORAGE_KEY, JSON.stringify(DEFAULT_PORTAL_STATE));
       return DEFAULT_PORTAL_STATE;
     }
     const parsed = JSON.parse(raw) as Partial<PortalState>;
-    return {
-      ...DEFAULT_PORTAL_STATE,
-      ...parsed,
-      learnerServicesContact: {
-        ...DEFAULT_PORTAL_STATE.learnerServicesContact,
-        ...(parsed.learnerServicesContact || {}),
-      },
-    };
+    const normalized = normalizePortalState(parsed);
+    localStorage.setItem(PORTAL_STORAGE_KEY, JSON.stringify(normalized));
+    return normalized;
   } catch {
     return DEFAULT_PORTAL_STATE;
   }
@@ -769,6 +870,229 @@ export function savePortalState(state: PortalState): void {
   } catch {
     // ignore storage quota errors cleanly
   }
+}
+
+function unwrapCloudPayload(raw: unknown): { state: Partial<PortalState> | null; updatedAt: string | null } {
+  if (!raw || typeof raw !== 'object') return { state: null, updatedAt: null };
+  const obj = raw as Record<string, unknown>;
+  // Handle JSONBin v3 `{ record: { ... } }` or `{ state: { ... }, updatedAt }` or direct PortalState
+  if (obj.record && typeof obj.record === 'object') {
+    const rec = obj.record as Record<string, unknown>;
+    if (rec.state && typeof rec.state === 'object') {
+      return {
+        state: rec.state as Partial<PortalState>,
+        updatedAt: typeof rec.updatedAt === 'string' ? rec.updatedAt : null,
+      };
+    }
+    return { state: rec as Partial<PortalState>, updatedAt: null };
+  }
+  if ('state' in obj) {
+    return {
+      state:
+        obj.state && typeof obj.state === 'object' ? (obj.state as Partial<PortalState>) : null,
+      updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : null,
+    };
+  }
+  if ('schoolYear' in obj || 'printJobs' in obj || 'officers' in obj) {
+    return {
+      state: obj as Partial<PortalState>,
+      updatedAt: typeof obj.lastPublishedAt === 'string' ? obj.lastPublishedAt : null,
+    };
+  }
+  return { state: null, updatedAt: null };
+}
+
+export async function fetchFromCloud(syncApiUrl?: string): Promise<{
+  state: PortalState | null;
+  mode: SyncConnectionMode;
+  updatedAt: string | null;
+}> {
+  const cleanExternalUrl = (syncApiUrl ?? loadSyncConfig().syncApiUrl).trim();
+  if (cleanExternalUrl) {
+    try {
+      const res = await fetch(cleanExternalUrl, { method: 'GET' });
+      if (res.ok) {
+        const data = (await res.json()) as unknown;
+        const unwrapped = unwrapCloudPayload(data);
+        if (unwrapped.state) {
+          const normalized = normalizePortalState(unwrapped.state);
+          savePortalState(normalized);
+          return { state: normalized, mode: 'cloud', updatedAt: unwrapped.updatedAt };
+        }
+      }
+    } catch {
+      // Fallback to shared Node server endpoint
+    }
+  }
+
+  try {
+    const res = await fetch(buildApiUrl('/api/portal/state'), { method: 'GET' });
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('application/json')) {
+      const data = (await res.json()) as {
+        state?: Partial<PortalState> | null;
+        updatedAt?: string | null;
+      };
+      if (data.state && typeof data.state === 'object') {
+        const normalized = normalizePortalState(data.state);
+        savePortalState(normalized);
+        return {
+          state: normalized,
+          mode: 'server',
+          updatedAt: data.updatedAt || normalized.lastPublishedAt || null,
+        };
+      }
+      return { state: null, mode: 'server', updatedAt: null };
+    }
+  } catch {
+    // Static host or offline preview fallback
+  }
+
+  return { state: null, mode: 'local', updatedAt: null };
+}
+
+export async function publishToCloud(
+  state: PortalState,
+  authToken?: string | null,
+  syncApiUrl?: string
+): Promise<{
+  ok: boolean;
+  mode: SyncConnectionMode;
+  updatedAt: string;
+  error?: string;
+}> {
+  const publishedAt = new Date().toISOString();
+  const payloadState: PortalState = {
+    ...state,
+    lastPublishedAt: publishedAt,
+  };
+  savePortalState(payloadState);
+
+  const cleanExternalUrl = (syncApiUrl ?? loadSyncConfig().syncApiUrl).trim();
+  let cloudSynced = false;
+  let serverSynced = false;
+  let lastError: string | undefined;
+
+  if (cleanExternalUrl) {
+    try {
+      const isJsonBin = cleanExternalUrl.includes('api.jsonbin.io');
+      const res = await fetch(cleanExternalUrl, {
+        method: isJsonBin ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadState),
+      });
+      if (res.ok) {
+        cloudSynced = true;
+      } else {
+        lastError = `External Cloud Sync returned status ${res.status}.`;
+      }
+    } catch {
+      lastError = 'External Cloud Sync endpoint could not be reached.';
+    }
+  }
+
+  if (authToken) {
+    try {
+      const res = await fetch(buildApiUrl('/api/portal/state'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ state: payloadState }),
+      });
+      if (res.ok) {
+        serverSynced = true;
+      } else if (!cloudSynced) {
+        const errPayload = (await res.json().catch(() => null)) as { error?: string } | null;
+        if (res.status === 401 || res.status === 403) {
+          lastError = errPayload?.error || 'Session expired. Please sign in again to publish.';
+        }
+      }
+    } catch {
+      // Static preview fallback cleanly handled below
+    }
+  }
+
+  if (cloudSynced) {
+    return { ok: true, mode: 'cloud', updatedAt: publishedAt };
+  }
+  if (serverSynced) {
+    return { ok: true, mode: 'server', updatedAt: publishedAt };
+  }
+  return {
+    ok: false,
+    mode: 'local',
+    updatedAt: publishedAt,
+    error: lastError,
+  };
+}
+
+export async function submitPublicItemToCloud(
+  kind: 'print-jobs' | 'lost-found' | 'tickets',
+  item: PrintRequestJob | LostFoundItem | GrievanceTicket,
+  updatedLocalState: PortalState,
+  syncApiUrl?: string
+): Promise<{ synced: boolean; mode: SyncConnectionMode }> {
+  savePortalState(updatedLocalState);
+
+  let synced = false;
+  let mode: SyncConnectionMode = 'local';
+
+  try {
+    const res = await fetch(buildApiUrl(`/api/portal/${kind}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item }),
+    });
+    if (res.ok) {
+      synced = true;
+      mode = 'server';
+    }
+  } catch {
+    // ignore if static host
+  }
+
+  const cleanExternalUrl = (syncApiUrl ?? loadSyncConfig().syncApiUrl).trim();
+  if (cleanExternalUrl) {
+    try {
+      const isJsonBin = cleanExternalUrl.includes('api.jsonbin.io');
+      const res = await fetch(cleanExternalUrl, {
+        method: isJsonBin ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedLocalState),
+      });
+      if (res.ok) {
+        synced = true;
+        mode = 'cloud';
+      }
+    } catch {
+      // ignore external failure cleanly
+    }
+  }
+
+  return { synced, mode };
+}
+
+export function exportPortalSnapshotJson(state: PortalState): string {
+  return JSON.stringify(
+    {
+      exportedAt: new Date().toISOString(),
+      portal: 'NNCHS SSLG Shared Portal Snapshot',
+      state,
+    },
+    null,
+    2
+  );
+}
+
+export function parsePortalSnapshotJson(rawJson: string): PortalState {
+  const parsed = JSON.parse(rawJson) as unknown;
+  const unwrapped = unwrapCloudPayload(parsed);
+  if (!unwrapped.state) {
+    throw new Error('Invalid NNCHS SSLG snapshot JSON file.');
+  }
+  return normalizePortalState(unwrapped.state);
 }
 
 export function generatePrintJobCode(existing: PrintRequestJob[]): string {

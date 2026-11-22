@@ -137,7 +137,7 @@ export function AdminAccountsView({
         fullName,
         role,
         positionOrClub,
-        department: department || 'Student Governance',
+        department: department || 'Learner Governance',
       });
       setInvites((prev) =>
         [...prev, created].sort((a, b) => a.positionOrClub.localeCompare(b.positionOrClub))

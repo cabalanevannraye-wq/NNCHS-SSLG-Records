@@ -1123,7 +1123,7 @@ export async function resolveSignedInUser(fbUser: FirebaseUser): Promise<AuthRes
           fullName: String(inv?.fullName || fbUser.displayName || email),
           role: priv.role,
           positionOrClub: String(inv?.positionOrClub || 'SSLG Member'),
-          department: String(inv?.department || 'Student Governance'),
+          department: String(inv?.department || 'Learner Governance'),
           avatarDataUrl: null,
           active: true,
           createdAt: serverTimestamp(),
@@ -1146,7 +1146,7 @@ export async function resolveSignedInUser(fbUser: FirebaseUser): Promise<AuthRes
           fullName: String(dirData.fullName || fbUser.displayName || email),
           role: (dirData.role as UserRole) || priv.role,
           positionOrClub: String(dirData.positionOrClub || 'SSLG Member'),
-          department: String(dirData.department || 'Student Governance'),
+          department: String(dirData.department || 'Learner Governance'),
           avatarDataUrl: (dirData.avatarDataUrl as string | null) ?? null,
           active: Boolean(dirData.active),
           createdAt: timestampToIso(dirData.createdAt),
@@ -1555,7 +1555,7 @@ export const firebaseService = {
             fullName: String(data.fullName || ''),
             role: (data.role as UserRole) || 'organization',
             positionOrClub: String(data.positionOrClub || ''),
-            department: String(data.department || 'Student Governance'),
+            department: String(data.department || 'Learner Governance'),
             active: Boolean(data.active),
             claimedUid: (data.claimedUid as string | null) ?? null,
             createdAt: timestampToIso(data.createdAt),
@@ -1626,7 +1626,7 @@ export const firebaseService = {
 
     const trimmedFullName = payload.fullName.trim();
     const trimmedPos = payload.positionOrClub.trim();
-    const trimmedDept = payload.department.trim() || 'Student Governance';
+    const trimmedDept = payload.department.trim() || 'Learner Governance';
 
     try {
       // Write user_private first so isAdmin() checks referencing admins/{uid} + user_private/{uid} succeed
@@ -1762,7 +1762,7 @@ export const firebaseService = {
         fullName: payload.fullName.trim(),
         role: payload.role,
         positionOrClub: payload.positionOrClub.trim(),
-        department: payload.department.trim() || 'Student Governance',
+        department: payload.department.trim() || 'Learner Governance',
         active: true,
         claimedUid: null,
         createdAt: serverTimestamp(),
@@ -1775,7 +1775,7 @@ export const firebaseService = {
         fullName: payload.fullName.trim(),
         role: payload.role,
         positionOrClub: payload.positionOrClub.trim(),
-        department: payload.department.trim() || 'Student Governance',
+        department: payload.department.trim() || 'Learner Governance',
         active: true,
         claimedUid: null,
         createdAt: now,

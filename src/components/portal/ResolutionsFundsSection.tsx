@@ -55,7 +55,7 @@ export function ResolutionsFundsSection({
               PHP {fundTotals.totalAllocated.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
             </p>
           </div>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-5">
+          <div className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-5">
             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
               Total Disbursed
             </p>
@@ -63,7 +63,7 @@ export function ResolutionsFundsSection({
               PHP {fundTotals.totalSpent.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
             </p>
           </div>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-[#eab308]/60 dark:border-yellow-500/40 p-5">
+          <div className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[#eab308]/60 dark:border-yellow-500/40 shadow-sm p-5">
             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
               Available Balance
             </p>
@@ -83,7 +83,7 @@ export function ResolutionsFundsSection({
             return (
               <div
                 key={fund.id}
-                className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-5 space-y-3"
+                className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-5 space-y-3"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -148,7 +148,7 @@ export function ResolutionsFundsSection({
           {filteredResolutions.map((rec) => (
             <article
               key={rec.id}
-              className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-5 flex flex-col justify-between space-y-4"
+              className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-5 flex flex-col justify-between space-y-4"
             >
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs font-semibold">

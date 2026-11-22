@@ -15,7 +15,7 @@ import {
   type PrintRequestJob,
 } from '../../lib/portalStore.ts';
 
-export function DotTimelineTracker({ currentStatus }: { currentStatus: PrintJobStatus }) {
+export function StatusTrackerTimeline({ currentStatus }: { currentStatus: PrintJobStatus }) {
   const currentIdx = Math.max(
     0,
     PRINT_TIMELINE_STEPS.findIndex((s) => s === currentStatus)
@@ -73,6 +73,8 @@ export function DotTimelineTracker({ currentStatus }: { currentStatus: PrintJobS
     </div>
   );
 }
+
+export const DotTimelineTracker = StatusTrackerTimeline;
 
 export function ServicesPrintingSection({
   portal,
@@ -169,7 +171,7 @@ export function ServicesPrintingSection({
       fileDataUrl: selectedFile?.dataUrl,
       fileLink: fileLink.trim() || undefined,
       notes: notes.trim() || undefined,
-      status: 'Request Submitted',
+      status: 'Submitted',
       submittedAt: new Date().toISOString(),
       adminNotes: 'Queued for review at SSLG Office (Room 104).',
     };
@@ -208,7 +210,7 @@ export function ServicesPrintingSection({
     <section className="space-y-6">
       <div>
         <p className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-yellow-300">
-          Student Academic Support · SSLG Office Room 104
+          Learner Academic Support · SSLG Office Room 104
         </p>
         <h2 className="text-2xl sm:text-3xl font-extrabold text-blue-950 dark:text-white tracking-tight">
           Project &lsquo;Free Printing&rsquo; for all Learners
@@ -224,7 +226,7 @@ export function ServicesPrintingSection({
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Free Printing Request Form */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 space-y-5">
+        <div className="lg:col-span-7 backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 space-y-5">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
             <h3 className="text-base font-extrabold text-blue-950 dark:text-white flex items-center gap-2">
               <Printer className="w-5 h-5 text-blue-700 dark:text-[#fde047]" />
@@ -252,7 +254,10 @@ export function ServicesPrintingSection({
                   </span>
                 </span>
               </div>
-              <DotTimelineTracker currentStatus={submittedJob.status} />
+              <p className="text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-[#fde047]">
+                Request Progress
+              </p>
+              <StatusTrackerTimeline currentStatus={submittedJob.status} />
             </div>
           )}
 
@@ -380,15 +385,15 @@ export function ServicesPrintingSection({
           </form>
         </div>
 
-        {/* Dot-to-Dot Flowline Tracking Lookup */}
-        <div className="lg:col-span-5 bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 space-y-5">
+        {/* Status Tracker Lookup */}
+        <div className="lg:col-span-5 backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 space-y-5">
           <div>
             <h3 className="text-base font-extrabold text-blue-950 dark:text-white">
-              Track Print Request (Dot Timeline)
+              Track Print Request (Status Tracker)
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Enter your <span className="font-mono-code font-bold">PRT-2026-XXX</span> code to
-              follow live progress from submission to pickup.
+              follow live Request Progress from submission to pickup.
             </p>
           </div>
 
@@ -432,7 +437,12 @@ export function ServicesPrintingSection({
                 </p>
               </div>
 
-              <DotTimelineTracker currentStatus={liveTrackedJob.status} />
+              <div className="space-y-1">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-[#fde047]">
+                  Request Progress
+                </p>
+                <StatusTrackerTimeline currentStatus={liveTrackedJob.status} />
+              </div>
 
               <div className="p-3 rounded-lg bg-white dark:bg-slate-950 border border-blue-100 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-200">
                 <strong>Office Update:</strong> {liveTrackedJob.adminNotes}

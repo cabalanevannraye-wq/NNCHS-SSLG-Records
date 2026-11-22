@@ -5,28 +5,44 @@ import {
   ArrowUp,
   Calendar,
   CheckCircle2,
+  Cloud,
   Download,
   Eye,
   EyeOff,
   FileText,
   FileUp,
   ImagePlus,
+  KeyRound,
+  Lock,
   Megaphone,
   PackageSearch,
   Plus,
   Printer,
+  RefreshCw,
+  Save,
   ShieldAlert,
   Sparkles,
   Trash2,
+  Upload,
   Users,
   Wallet,
   X,
 } from 'lucide-react';
-import { downloadOriginalPrintFile, downloadResolutionPdf } from '../../lib/downloadEngine.ts';
+import { buildApiUrl } from '../../lib/api.ts';
+import {
+  downloadOriginalPrintFile,
+  downloadResolutionPdf,
+  downloadTextFile,
+} from '../../lib/downloadEngine.ts';
 import {
   DEFAULT_YORP_LOGO_PATH,
   PRINT_TIMELINE_STEPS,
+  exportPortalSnapshotJson,
+  loadSyncConfig,
+  parsePortalSnapshotJson,
   readFileAsDataUrl,
+  saveSyncConfig,
+  type AboutPhotoItem,
   type BulletinPost,
   type CalendarEventItem,
   type FundAllocationItem,
@@ -42,9 +58,10 @@ import {
   type PrintRequestJob,
   type PublicClub,
   type PublicOfficer,
+  type SyncConnectionMode,
 } from '../../lib/portalStore.ts';
 import { UserAvatar } from '../SSLGCrest.tsx';
-import { DotTimelineTracker } from './ServicesPrintingSection.tsx';
+import { StatusTrackerTimeline } from './ServicesPrintingSection.tsx';
 
 export type PortalAdminTabId =
   | 'portal-printing'
@@ -76,11 +93,29 @@ export function PortalAdminTabs({
   portal,
   onUpdatePortal,
   onNotify,
+  syncMode = 'local',
+  syncing = false,
+  lastSyncedAt = null,
+  onPublishNow,
+  onPullCloudNow,
+  onImportSnapshot,
+  authToken = null,
+  currentAdminUsername = 'admin',
+  onCredentialsUpdated,
 }: {
   activeTab: PortalAdminTabId;
   portal: PortalState;
   onUpdatePortal: (updater: (prev: PortalState) => PortalState) => void;
   onNotify: (msg: string) => void;
+  syncMode?: SyncConnectionMode;
+  syncing?: boolean;
+  lastSyncedAt?: string | null;
+  onPublishNow?: () => Promise<void>;
+  onPullCloudNow?: () => Promise<void>;
+  onImportSnapshot?: (state: PortalState) => Promise<void>;
+  authToken?: string | null;
+  currentAdminUsername?: string;
+  onCredentialsUpdated?: (newUsername: string, newToken: string) => void;
 }) {
   // 1. Free Printing Preview Modal State
   const [previewJob, setPreviewJob] = useState<PrintRequestJob | null>(null);
@@ -165,6 +200,28 @@ export function PortalAdminTabs({
   const [fundSpent, setFundSpent] = useState(0);
   const [fundNotes, setFundNotes] = useState('');
 
+  // About Section Scrollable Photos Gallery State
+  const [aboutPhotoCaption, setAboutPhotoCaption] = useState('');
+  const [aboutPhotoUrl, setAboutPhotoUrl] = useState('');
+
+  // Cloud Sync & Snapshot Backup State
+  const [syncApiUrlInput, setSyncApiUrlInput] = useState(() => loadSyncConfig().syncApiUrl);
+  const snapshotImportRef = useRef<HTMLInputElement | null>(null);
+
+  // Admin Credential Manager State
+  const [credUsername, setCredUsername] = useState(currentAdminUsername || 'admin');
+  const [credCurrentPassword, setCredCurrentPassword] = useState('');
+  const [credNewPassword, setCredNewPassword] = useState('');
+  const [credConfirmPassword, setCredConfirmPassword] = useState('');
+  const [credSaving, setCredSaving] = useState(false);
+  const [credError, setCredError] = useState('');
+
+  useEffect(() => {
+    if (currentAdminUsername) {
+      setCredUsername(currentAdminUsername);
+    }
+  }, [currentAdminUsername]);
+
   useEffect(() => {
     if (!previewJob?.fileDataUrl) {
       setPreviewBlobUrl(null);
@@ -237,32 +294,45 @@ export function PortalAdminTabs({
 
     return (
       <div className="space-y-6">
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="backdrop-blur-md bg-white/80 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-extrabold text-blue-950 dark:text-white flex items-center gap-2">
               <Printer className="w-5 h-5 text-blue-700 dark:text-[#fde047]" />
               <span>Project &lsquo;Free Printing&rsquo; — Ready-to-Print Queue</span>
             </h2>
             <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
-              Inspect exact uploaded files (PDF, DOCX, images), print immediately, download original files, and advance the 5-dot learner timeline.
+              Inspect exact uploaded files (PDF, DOCX, images), print immediately, download original files, and advance the Status Tracker Request Progress.
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
-            {(['All', ...PRINT_TIMELINE_STEPS] as const).map((st) => (
+          <div className="flex flex-wrap items-center gap-2">
+            {onPublishNow && (
               <button
-                key={st}
                 type="button"
-                onClick={() => setPrintStatusFilter(st)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
-                  printStatusFilter === st
-                    ? 'bg-[#1e3a8a] text-white border-[#1e3a8a]'
-                    : 'bg-blue-50/60 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-blue-200 dark:border-slate-700'
-                }`}
+                disabled={syncing}
+                onClick={() => void onPublishNow()}
+                className="px-3 py-1.5 rounded-lg bg-[#facc15] hover:bg-[#eab308] text-slate-950 text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
               >
-                {st}
+                <Cloud className="w-3.5 h-3.5" />
+                <span>{syncing ? 'Publishing...' : 'Publish Queue to All Visitors'}</span>
               </button>
-            ))}
+            )}
+            <div className="flex flex-wrap gap-1.5">
+              {(['All', ...PRINT_TIMELINE_STEPS] as const).map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setPrintStatusFilter(st)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                    printStatusFilter === st
+                      ? 'bg-[#1e3a8a] text-white border-[#1e3a8a]'
+                      : 'bg-blue-50/60 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-blue-200 dark:border-slate-700'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -355,15 +425,15 @@ export function PortalAdminTabs({
                   </div>
                 </div>
 
-                {/* Live Dot Timeline */}
+                {/* Request Progress Status Tracker */}
                 <div className="p-3.5 rounded-xl bg-blue-50/50 dark:bg-slate-950/60 border border-blue-100 dark:border-slate-800">
-                  <DotTimelineTracker currentStatus={job.status} />
+                  <StatusTrackerTimeline currentStatus={job.status} />
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
                   <div className="md:col-span-4">
                     <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
-                      Set Timeline Step Directly
+                      Set Request Progress Step
                     </label>
                     <select
                       value={job.status}
@@ -1211,6 +1281,111 @@ export function PortalAdminTabs({
             </div>
           </div>
         </div>
+
+        {/* About the NNCHS-SSLG Scrollable Photos Strip Manager */}
+        <div className="backdrop-blur-md bg-white/80 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 space-y-5">
+          <div>
+            <h3 className="text-base font-extrabold text-blue-950 dark:text-white flex items-center gap-2">
+              <ImagePlus className="w-4 h-4 text-blue-700 dark:text-[#fde047]" />
+              <span>About the NNCHS-SSLG — Scrollable Photos Strip ({portal.aboutPhotos.length})</span>
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+              Manage photos shown inside the horizontal scrollable gallery under About the NNCHS-SSLG.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {portal.aboutPhotos.map((item: AboutPhotoItem) => (
+              <div
+                key={item.id}
+                className="rounded-xl border border-blue-100 dark:border-slate-700 bg-blue-50/40 dark:bg-slate-800/50 overflow-hidden flex flex-col justify-between"
+              >
+                <img
+                  src={item.url}
+                  alt={item.caption}
+                  className="w-full h-32 object-cover bg-[#0f172a]"
+                />
+                <div className="p-3 space-y-2 text-xs">
+                  <input
+                    type="text"
+                    value={item.caption}
+                    onChange={(e) =>
+                      onUpdatePortal((prev) => ({
+                        ...prev,
+                        aboutPhotos: prev.aboutPhotos.map((p) =>
+                          p.id === item.id ? { ...p, caption: e.target.value } : p
+                        ),
+                      }))
+                    }
+                    placeholder="Photo caption..."
+                    className="w-full px-2.5 py-1.5 rounded border border-blue-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-blue-950 dark:text-white font-semibold"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdatePortal((prev) => ({
+                        ...prev,
+                        aboutPhotos: prev.aboutPhotos.filter((p) => p.id !== item.id),
+                      }));
+                      onNotify('About gallery photo removed.');
+                    }}
+                    className="text-[11px] font-bold text-blue-800 dark:text-[#fde047] hover:underline cursor-pointer"
+                  >
+                    Remove Photo
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!aboutPhotoUrl) return;
+              const newItem: AboutPhotoItem = {
+                id: `about-photo-${Date.now()}`,
+                url: aboutPhotoUrl,
+                caption: aboutPhotoCaption.trim() || 'NNCHS SSLG Campus Highlight',
+              };
+              onUpdatePortal((prev) => ({
+                ...prev,
+                aboutPhotos: [...prev.aboutPhotos, newItem],
+              }));
+              setAboutPhotoUrl('');
+              setAboutPhotoCaption('');
+              onNotify('Photo added to About the NNCHS-SSLG scrollable strip.');
+            }}
+            className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-4 border-t border-slate-100 dark:border-slate-800"
+          >
+            <input
+              type="text"
+              value={aboutPhotoCaption}
+              onChange={(e) => setAboutPhotoCaption(e.target.value)}
+              placeholder="Photo caption (e.g., Leadership Congress 2026)..."
+              className="md:col-span-7 px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+            <label className="md:col-span-3 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-blue-50 dark:bg-slate-800 border border-blue-200 dark:border-slate-700 text-xs font-bold cursor-pointer">
+              <ImagePlus className="w-3.5 h-3.5" />
+              <span>{aboutPhotoUrl ? 'Photo Ready' : 'Upload Photo *'}</span>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (f) setAboutPhotoUrl(await readFileAsDataUrl(f));
+                }}
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={!aboutPhotoUrl}
+              className="md:col-span-2 py-2 px-3 rounded-lg bg-[#1e3a8a] hover:bg-[#1d4ed8] disabled:opacity-50 text-white text-xs font-extrabold cursor-pointer"
+            >
+              Add to Strip
+            </button>
+          </form>
+        </div>
       </div>
     );
   }
@@ -1996,13 +2171,210 @@ export function PortalAdminTabs({
     onNotify('Budget category added.');
   };
 
+  const handleSaveCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCredError('');
+    if (!authToken) {
+      setCredError('Backend Admin token unavailable on this static host.');
+      return;
+    }
+    if (credNewPassword && credNewPassword.length < 6) {
+      setCredError('New password must be at least 6 characters.');
+      return;
+    }
+    if (credNewPassword && credNewPassword !== credConfirmPassword) {
+      setCredError('Password confirmation does not match.');
+      return;
+    }
+
+    setCredSaving(true);
+    try {
+      const res = await fetch(buildApiUrl('/api/admin/change-credentials'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          currentPassword: credCurrentPassword,
+          newUsername: credUsername.trim(),
+          newPassword: credNewPassword || undefined,
+        }),
+      });
+      const data = (await res.json()) as {
+        username?: string;
+        token?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.token) {
+        setCredError(data.error || 'Unable to update admin credentials.');
+        return;
+      }
+      setCredCurrentPassword('');
+      setCredNewPassword('');
+      setCredConfirmPassword('');
+      onCredentialsUpdated?.(data.username || credUsername.trim(), data.token);
+      onNotify(`Admin credentials updated (${data.username || credUsername.trim()}).`);
+    } catch {
+      setCredError('Unable to reach server Admin credentials endpoint.');
+    } finally {
+      setCredSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
+      {/* 0. Global Cloud Sync & Snapshot Backup */}
+      <div className="backdrop-blur-md bg-white/80 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-extrabold text-blue-950 dark:text-white flex items-center gap-2">
+              <Cloud className="w-5 h-5 text-blue-700 dark:text-[#fde047]" />
+              <span>Global Multi-User Cloud Sync &amp; Backup</span>
+            </h2>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+              Publish website edits to all visitors across devices, configure an external Cloud Sync webhook (JSONBin / Google Apps Script), or export/import JSON snapshots.
+            </p>
+          </div>
+          <span
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border inline-flex items-center gap-1.5 ${
+              syncMode === 'cloud' || syncMode === 'server'
+                ? 'bg-[#facc15]/25 text-blue-950 dark:text-[#fde047] border-[#eab308]'
+                : 'bg-blue-50 dark:bg-slate-800 text-blue-900 dark:text-slate-200 border-blue-200 dark:border-slate-700'
+            }`}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>
+              {syncMode === 'cloud'
+                ? 'Live Cloud Sync Connected'
+                : syncMode === 'server'
+                ? 'Shared Server Sync Connected'
+                : 'Local Browser Cache Mode'}
+            </span>
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
+          <div className="lg:col-span-7">
+            <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+              Optional External Cloud Sync URL (JSONBin v3 / Google Apps Script / Webhook)
+            </label>
+            <input
+              type="url"
+              value={syncApiUrlInput}
+              onChange={(e) => setSyncApiUrlInput(e.target.value)}
+              placeholder="https://script.google.com/macros/s/.../exec or https://api.jsonbin.io/v3/b/..."
+              className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+            />
+          </div>
+          <div className="lg:col-span-5 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={async () => {
+                saveSyncConfig({ syncApiUrl: syncApiUrlInput });
+                onNotify(
+                  syncApiUrlInput.trim()
+                    ? 'External Cloud Sync URL saved. Pulling latest shared data...'
+                    : 'External Cloud Sync URL cleared (using built-in shared server).'
+                );
+                await onPullCloudNow?.();
+              }}
+              className="px-3.5 py-2 rounded-lg bg-[#1e3a8a] hover:bg-[#1d4ed8] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+            >
+              <Save className="w-3.5 h-3.5 text-[#fde047]" />
+              <span>Save Sync URL</span>
+            </button>
+            {onPullCloudNow && (
+              <button
+                type="button"
+                disabled={syncing}
+                onClick={() => void onPullCloudNow()}
+                className="px-3.5 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-blue-950 dark:text-slate-100 border border-blue-200 dark:border-slate-700 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+                <span>Pull Latest</span>
+              </button>
+            )}
+            {onPublishNow && (
+              <button
+                type="button"
+                disabled={syncing}
+                onClick={() => void onPublishNow()}
+                className="px-3.5 py-2 rounded-lg bg-[#facc15] hover:bg-[#eab308] text-slate-950 text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+              >
+                <Cloud className="w-3.5 h-3.5" />
+                <span>Publish Updates Now</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
+          <span className="text-slate-500 dark:text-slate-400">
+            Last published sync:{' '}
+            <strong className="text-blue-950 dark:text-slate-200">
+              {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : 'Local state active'}
+            </strong>
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                downloadTextFile(
+                  `nnchs-sslg-snapshot-${new Date().toISOString().slice(0, 10)}.json`,
+                  exportPortalSnapshotJson(portal),
+                  'application/json;charset=utf-8',
+                  onNotify
+                )
+              }
+              className="px-3.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-slate-800 text-blue-900 dark:text-[#fde047] border border-blue-200 dark:border-slate-700 font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export JSON Snapshot</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => snapshotImportRef.current?.click()}
+              className="px-3.5 py-1.5 rounded-lg bg-[#1e3a8a] hover:bg-[#1d4ed8] text-white font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 text-[#fde047]" />
+              <span>Import JSON Snapshot</span>
+            </button>
+            <input
+              ref={snapshotImportRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                e.target.value = '';
+                if (!f) return;
+                try {
+                  const raw = await f.text();
+                  const parsedState = parsePortalSnapshotJson(raw);
+                  if (onImportSnapshot) {
+                    await onImportSnapshot(parsedState);
+                  } else {
+                    onUpdatePortal(() => parsedState);
+                    onNotify('JSON Snapshot imported cleanly.');
+                  }
+                } catch (err) {
+                  onNotify(
+                    err instanceof Error ? err.message : 'Unable to parse selected JSON snapshot.'
+                  );
+                }
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* 1. Resolutions & PDF Repository */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         <form
           onSubmit={handleAddResolution}
-          className="lg:col-span-5 bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 space-y-3"
+          className="lg:col-span-5 backdrop-blur-md bg-white/80 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 space-y-3"
         >
           <h2 className="text-base font-extrabold text-blue-950 dark:text-white flex items-center gap-2">
             <FileText className="w-5 h-5 text-blue-700 dark:text-[#fde047]" />
@@ -2091,7 +2463,7 @@ export function PortalAdminTabs({
                   {rec.numberCode}: {rec.title}
                 </p>
                 <p className="text-slate-500 dark:text-slate-300">
-                  {rec.datePassed} · {rec.attachedPdfName ? `Attached PDF: ${rec.attachedPdfName}` : 'Generated PDF via pdf-lib'}
+                  {rec.datePassed} · {rec.attachedPdfName ? `Attached PDF: ${rec.attachedPdfName}` : 'Generated PDF via jsPDF'}
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -2355,6 +2727,91 @@ export function PortalAdminTabs({
           ))}
         </div>
       </div>
+
+      {/* 4. Website Admin Account Credentials Manager */}
+      <form
+        onSubmit={handleSaveCredentials}
+        className="backdrop-blur-md bg-white/80 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 space-y-4"
+      >
+        <div>
+          <h3 className="text-base font-extrabold text-blue-950 dark:text-white flex items-center gap-2">
+            <KeyRound className="w-4 h-4 text-blue-700 dark:text-[#fde047]" />
+            <span>Update Website Admin Login Credentials</span>
+          </h3>
+          <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+            Change the Website CMS Administrator username or password securely on the server.
+          </p>
+        </div>
+
+        {credError && (
+          <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/60 border border-blue-300 dark:border-blue-700 text-xs font-bold text-blue-950 dark:text-[#fde047]">
+            {credError}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+              New Admin Username
+            </label>
+            <input
+              type="text"
+              required
+              value={credUsername}
+              onChange={(e) => setCredUsername(e.target.value)}
+              className="w-full px-3 py-2 text-xs font-bold rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+              Current Password *
+            </label>
+            <input
+              type="password"
+              required
+              value={credCurrentPassword}
+              onChange={(e) => setCredCurrentPassword(e.target.value)}
+              placeholder="Current password"
+              className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+              New Password (min. 6 chars)
+            </label>
+            <input
+              type="password"
+              minLength={6}
+              value={credNewPassword}
+              onChange={(e) => setCredNewPassword(e.target.value)}
+              placeholder="Leave blank to keep current"
+              className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+              Confirm New Password
+            </label>
+            <input
+              type="password"
+              minLength={6}
+              value={credConfirmPassword}
+              onChange={(e) => setCredConfirmPassword(e.target.value)}
+              placeholder="Re-enter new password"
+              className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+            />
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={credSaving || !authToken}
+          className="px-5 py-2.5 rounded-xl bg-[#1e3a8a] hover:bg-[#1d4ed8] disabled:opacity-50 text-white text-xs font-extrabold inline-flex items-center gap-2 cursor-pointer"
+        >
+          <Lock className="w-3.5 h-3.5 text-[#fde047]" />
+          <span>{credSaving ? 'Saving Credentials...' : 'Save Admin Credentials'}</span>
+        </button>
+      </form>
     </div>
   );
 }

@@ -17,6 +17,16 @@ export function SSLGCrest({ className = 'w-10 h-10' }: { className?: string }) {
   );
 }
 
+export function NNCHSSchoolSeal({ className = 'w-10 h-10' }: { className?: string }) {
+  return (
+    <img
+      src="/assets/aistudio/nnchs-logo_4218aa21.jpg"
+      alt="Nabunturan National Comprehensive High School Seal"
+      className={`object-cover rounded-full border border-blue-900/15 dark:border-yellow-400/30 bg-white select-none ${className}`}
+    />
+  );
+}
+
 const AVATAR_SIZE_MAP = {
   xs: 'w-7 h-7 text-[11px]',
   sm: 'w-9 h-9 text-xs',

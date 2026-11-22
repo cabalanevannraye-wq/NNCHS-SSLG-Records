@@ -240,6 +240,58 @@ async function startServer() {
     return `${payload}.${sig}`;
   };
 
+  const verifyCmsToken = (token: string | undefined): { username: string } | null => {
+    if (!token || !token.includes('.')) return null;
+    const parts = token.split('.');
+    if (parts.length !== 2) return null;
+    const [payloadB64, sigB64] = parts;
+    if (!payloadB64 || !sigB64) return null;
+    try {
+      const expectedSig = crypto
+        .createHmac('sha256', cmsTokenSecret)
+        .update(payloadB64)
+        .digest('base64url');
+      const sigBuf = Buffer.from(sigB64);
+      const expectedBuf = Buffer.from(expectedSig);
+      if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+        return null;
+      }
+      const decoded = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as {
+        sub?: string;
+        role?: string;
+        exp?: number;
+      };
+      if (!decoded.sub || decoded.role !== 'admin' || !decoded.exp || decoded.exp < Date.now()) {
+        return null;
+      }
+      return { username: decoded.sub };
+    } catch {
+      return null;
+    }
+  };
+
+  const requireCmsOrFirebaseAdmin = async (
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ) => {
+    const authHeader = req.headers.authorization;
+    const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined;
+    const cmsUser = verifyCmsToken(bearer);
+    if (cmsUser) {
+      (req as express.Request & { cmsAdmin?: { username: string } }).cmsAdmin = cmsUser;
+      next();
+      return;
+    }
+    const fbUser = await verifyFirebaseIdToken(bearer);
+    if (fbUser) {
+      (req as express.Request & { firebaseUser: VerifiedTokenUser }).firebaseUser = fbUser;
+      next();
+      return;
+    }
+    res.status(401).json({ error: 'Admin authentication required to publish portal updates.' });
+  };
+
   app.get('/api/admin/status', (_req, res) => {
     const envConfigured = Boolean(process.env.ADMIN_PASSCODE && process.env.ADMIN_PASSCODE.trim());
     const fileConfigured = Boolean(readStoredAdminAuth());
@@ -326,6 +378,203 @@ async function startServer() {
     }
 
     res.json({ token: signCmsToken(stored.username), username: stored.username });
+  });
+
+  app.post('/api/admin/change-credentials', requireCmsOrFirebaseAdmin, (req, res) => {
+    if (process.env.ADMIN_PASSCODE?.trim()) {
+      res.status(409).json({
+        error: 'Credentials are locked to ADMIN_PASSCODE in server environment variables.',
+      });
+      return;
+    }
+
+    const { currentPassword, newUsername, newPassword } = req.body as {
+      currentPassword?: string;
+      newUsername?: string;
+      newPassword?: string;
+    };
+
+    const cleanNewUser = (newUsername || '').trim().toLowerCase();
+    if (!cleanNewUser || cleanNewUser.length < 3) {
+      res.status(400).json({ error: 'New admin username must be at least 3 characters.' });
+      return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+      res.status(400).json({ error: 'New password must be at least 6 characters.' });
+      return;
+    }
+
+    const stored = readStoredAdminAuth();
+    const isFirebaseVerified = Boolean(
+      (req as express.Request & { firebaseUser?: VerifiedTokenUser }).firebaseUser
+    );
+    if (stored && !isFirebaseVerified) {
+      if (!currentPassword) {
+        res.status(400).json({ error: 'Current password is required to update credentials.' });
+        return;
+      }
+      const derived = crypto.scryptSync(currentPassword, stored.salt, 64);
+      const expected = Buffer.from(stored.hash, 'hex');
+      if (derived.length !== expected.length || !crypto.timingSafeEqual(derived, expected)) {
+        res.status(401).json({ error: 'Current password is incorrect.' });
+        return;
+      }
+    }
+
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.scryptSync(newPassword, salt, 64).toString('hex');
+    const updatedRecord: StoredAdminAuth = {
+      username: cleanNewUser,
+      salt,
+      hash,
+      createdAt: new Date().toISOString(),
+    };
+    const dataDir = path.dirname(adminAuthFile);
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(adminAuthFile, JSON.stringify(updatedRecord, null, 2), 'utf8');
+
+    res.json({
+      token: signCmsToken(cleanNewUser),
+      username: cleanNewUser,
+    });
+  });
+
+  // Shared Multi-User Public Portal State (Published by Admin -> Seen by All Visitors)
+  const portalStateFile = path.join(path.resolve(process.cwd(), 'data'), 'portal-state.json');
+
+  interface StoredPortalEnvelope {
+    state: Record<string, unknown>;
+    updatedAt: string;
+  }
+
+  const readPortalEnvelope = (): StoredPortalEnvelope | null => {
+    try {
+      if (!fs.existsSync(portalStateFile)) return null;
+      const raw = fs.readFileSync(portalStateFile, 'utf8');
+      const parsed = JSON.parse(raw) as Partial<StoredPortalEnvelope>;
+      if (parsed && parsed.state && typeof parsed.state === 'object' && !Array.isArray(parsed.state)) {
+        return {
+          state: parsed.state,
+          updatedAt: parsed.updatedAt || new Date().toISOString(),
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const writePortalEnvelope = (state: Record<string, unknown>): string => {
+    const dataDir = path.dirname(portalStateFile);
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    const updatedAt = new Date().toISOString();
+    const tmpFile = `${portalStateFile}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify({ state, updatedAt }, null, 2), 'utf8');
+    fs.renameSync(tmpFile, portalStateFile);
+    return updatedAt;
+  };
+
+  app.get('/api/portal/state', (_req, res) => {
+    const envelope = readPortalEnvelope();
+    if (!envelope) {
+      res.json({ state: null, updatedAt: null });
+      return;
+    }
+    res.json({ state: envelope.state, updatedAt: envelope.updatedAt });
+  });
+
+  app.post('/api/portal/state', requireCmsOrFirebaseAdmin, (req, res) => {
+    const body = req.body as { state?: unknown };
+    if (!body?.state || typeof body.state !== 'object' || Array.isArray(body.state)) {
+      res.status(400).json({ error: 'Invalid portal state payload.' });
+      return;
+    }
+    const updatedAt = writePortalEnvelope(body.state as Record<string, unknown>);
+    res.json({ ok: true, updatedAt });
+  });
+
+  app.post('/api/portal/print-jobs', (req, res) => {
+    const job = (req.body as { item?: Record<string, unknown> })?.item;
+    if (
+      !job ||
+      typeof job !== 'object' ||
+      typeof job.jobCode !== 'string' ||
+      typeof job.studentName !== 'string' ||
+      typeof job.fileName !== 'string'
+    ) {
+      res.status(400).json({ error: 'Invalid Free Printing submission payload.' });
+      return;
+    }
+    const sanitizedJob: Record<string, unknown> = {
+      ...job,
+      id: typeof job.id === 'string' && job.id ? job.id : `prt-${Date.now()}`,
+      status: 'Submitted',
+    };
+    const envelope = readPortalEnvelope();
+    const currentState: Record<string, unknown> = envelope?.state ? { ...envelope.state } : {};
+    const existing = Array.isArray(currentState.printJobs) ? currentState.printJobs : [];
+    const deduped = existing.filter(
+      (j) => !(j && typeof j === 'object' && (j as { id?: unknown }).id === sanitizedJob.id)
+    );
+    currentState.printJobs = [sanitizedJob, ...deduped];
+    const updatedAt = writePortalEnvelope(currentState);
+    res.status(201).json({ ok: true, updatedAt });
+  });
+
+  app.post('/api/portal/lost-found', (req, res) => {
+    const item = (req.body as { item?: Record<string, unknown> })?.item;
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      typeof item.itemName !== 'string' ||
+      typeof item.lastSeen !== 'string'
+    ) {
+      res.status(400).json({ error: 'Invalid Lost & Found payload.' });
+      return;
+    }
+    const sanitizedItem: Record<string, unknown> = {
+      ...item,
+      id: typeof item.id === 'string' && item.id ? item.id : `lf-${Date.now()}`,
+      status: 'Open',
+    };
+    const envelope = readPortalEnvelope();
+    const currentState: Record<string, unknown> = envelope?.state ? { ...envelope.state } : {};
+    const existing = Array.isArray(currentState.lostFound) ? currentState.lostFound : [];
+    const deduped = existing.filter(
+      (i) => !(i && typeof i === 'object' && (i as { id?: unknown }).id === sanitizedItem.id)
+    );
+    currentState.lostFound = [sanitizedItem, ...deduped];
+    const updatedAt = writePortalEnvelope(currentState);
+    res.status(201).json({ ok: true, updatedAt });
+  });
+
+  app.post('/api/portal/tickets', (req, res) => {
+    const ticket = (req.body as { item?: Record<string, unknown> })?.item;
+    if (
+      !ticket ||
+      typeof ticket !== 'object' ||
+      typeof ticket.ticketCode !== 'string' ||
+      typeof ticket.subject !== 'string' ||
+      typeof ticket.details !== 'string'
+    ) {
+      res.status(400).json({ error: 'Invalid report submission payload.' });
+      return;
+    }
+    const sanitizedTicket: Record<string, unknown> = {
+      ...ticket,
+      id: typeof ticket.id === 'string' && ticket.id ? ticket.id : `tkt-${Date.now()}`,
+      approvedForPublic: false,
+      status: 'Pending Approval',
+    };
+    const envelope = readPortalEnvelope();
+    const currentState: Record<string, unknown> = envelope?.state ? { ...envelope.state } : {};
+    const existing = Array.isArray(currentState.tickets) ? currentState.tickets : [];
+    const deduped = existing.filter(
+      (t) => !(t && typeof t === 'object' && (t as { id?: unknown }).id === sanitizedTicket.id)
+    );
+    currentState.tickets = [sanitizedTicket, ...deduped];
+    const updatedAt = writePortalEnvelope(currentState);
+    res.status(201).json({ ok: true, updatedAt });
   });
 
   // Upload a prepared document or Stage 5 scanned hardcopy

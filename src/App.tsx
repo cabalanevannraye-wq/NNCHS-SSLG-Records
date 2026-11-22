@@ -7,6 +7,7 @@ import {
   Calendar,
   Camera,
   CheckCircle2,
+  Cloud,
   FilePlus2,
   FileStack,
   FileText,
@@ -50,6 +51,7 @@ import { GoogleDriveView } from './components/GoogleDriveView.tsx';
 import { LoginView, type CmsAdminSession } from './components/LoginView.tsx';
 import { PassDocumentModal } from './components/PassDocumentModal.tsx';
 import {
+  NNCHSSchoolSeal,
   SSLGCrest,
   UserAvatar,
   resizeImageFileToDataUrl,
@@ -79,7 +81,12 @@ import { PublicNavbar, type PortalJumpTarget } from './components/portal/PublicN
 import { ReportingDeskSection } from './components/portal/ReportingDeskSection.tsx';
 import { ResolutionsFundsSection } from './components/portal/ResolutionsFundsSection.tsx';
 import { ServicesPrintingSection } from './components/portal/ServicesPrintingSection.tsx';
-import { getDocumentFileUrl, getHardcopyFileUrl } from './lib/api.ts';
+import {
+  getCachedIdToken,
+  getDocumentFileUrl,
+  getFreshIdToken,
+  getHardcopyFileUrl,
+} from './lib/api.ts';
 import {
   buildLeaderboardAndDirectory,
   DEFAULT_SETTINGS,
@@ -89,13 +96,17 @@ import {
 } from './lib/firebaseService.ts';
 import { downloadDriveFileBlob } from './lib/googleDrive.ts';
 import {
+  fetchFromCloud,
   loadPortalState,
+  publishToCloud,
   savePortalState,
+  submitPublicItemToCloud,
   type GrievanceTicket,
   type LostFoundItem,
   type PortalSectionId,
   type PortalState,
   type PrintRequestJob,
+  type SyncConnectionMode,
 } from './lib/portalStore.ts';
 import type {
   DocumentModuleType,
@@ -150,6 +161,13 @@ export default function App() {
 
   // Public Portal Shared State (dynamic CMS persistence synced with Admin Hub)
   const [portalState, setPortalState] = useState<PortalState>(() => loadPortalState());
+  const portalStateRef = useRef<PortalState>(portalState);
+  portalStateRef.current = portalState;
+  const [syncMode, setSyncMode] = useState<SyncConnectionMode>('local');
+  const [syncing, setSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(
+    () => portalState.lastPublishedAt ?? null
+  );
 
   // Navigation & Sub-tab Control
   const [screenMode, setScreenMode] = useState<AppScreenMode>('portal');
@@ -231,12 +249,97 @@ export default function App() {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
+  const resolveActiveAuthToken = async (): Promise<string | null> => {
+    if (cmsSession?.token) return cmsSession.token;
+    if (auth.currentUser) {
+      try {
+        return await getFreshIdToken();
+      } catch {
+        return getCachedIdToken() || null;
+      }
+    }
+    return null;
+  };
+
+  const handlePullCloudNow = async (silent = false) => {
+    setSyncing(true);
+    try {
+      const res = await fetchFromCloud();
+      setSyncMode(res.mode);
+      if (res.updatedAt) {
+        setLastSyncedAt(res.updatedAt);
+      }
+      if (res.state) {
+        setPortalState(res.state);
+        portalStateRef.current = res.state;
+        if (!silent) {
+          notify('Pulled latest published website updates.');
+        }
+      } else if (!silent) {
+        notify('Sync checked. Showing latest available portal state.');
+      }
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const pushStateToCloud = async (targetState: PortalState, showToast = false) => {
+    const token = await resolveActiveAuthToken();
+    if (!token) return;
+    setSyncing(true);
+    try {
+      const res = await publishToCloud(targetState, token);
+      setSyncMode(res.mode);
+      setLastSyncedAt(res.updatedAt);
+      if (showToast) {
+        if (res.ok) {
+          notify(
+            res.mode === 'cloud'
+              ? 'Published to Cloud Sync — visible to all visitors worldwide.'
+              : 'Published to shared server — visible to all campus visitors.'
+          );
+        } else {
+          notify(
+            res.error ||
+              'Saved locally. Connect the shared server or External Cloud Sync URL for cross-device publishing.'
+          );
+        }
+      }
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handlePublishNow = async () => {
+    await pushStateToCloud(portalStateRef.current, true);
+  };
+
+  const handleImportSnapshot = async (imported: PortalState) => {
+    setPortalState(imported);
+    portalStateRef.current = imported;
+    savePortalState(imported);
+    await pushStateToCloud(imported, false);
+    notify('JSON Snapshot imported and synced cleanly.');
+  };
+
+  useEffect(() => {
+    void handlePullCloudNow(true);
+  }, []);
+
+  useEffect(() => {
+    if (screenMode !== 'portal') return;
+    const timer = window.setInterval(() => {
+      void handlePullCloudNow(true);
+    }, 20000);
+    return () => window.clearInterval(timer);
+  }, [screenMode]);
+
   const updatePortal = (updater: (prev: PortalState) => PortalState) => {
-    setPortalState((prev) => {
-      const next = updater(prev);
-      savePortalState(next);
-      return next;
-    });
+    const next = updater(portalStateRef.current);
+    portalStateRef.current = next;
+    setPortalState(next);
+    savePortalState(next);
+    void pushStateToCloud(next, false);
   };
 
   useEffect(() => {
@@ -341,26 +444,53 @@ export default function App() {
     }, 60);
   };
 
-  // Public Portal Submission Handlers
+  // Public Portal Submission Handlers (Local + Shared Server / Cloud Sync)
   const handlePublicPrintJob = (job: PrintRequestJob) => {
-    updatePortal((prev) => ({
-      ...prev,
-      printJobs: [job, ...prev.printJobs],
-    }));
+    const next: PortalState = {
+      ...portalStateRef.current,
+      printJobs: [job, ...portalStateRef.current.printJobs],
+    };
+    portalStateRef.current = next;
+    setPortalState(next);
+    savePortalState(next);
+    void submitPublicItemToCloud('print-jobs', job, next).then(({ synced, mode }) => {
+      if (synced) {
+        setSyncMode(mode);
+        setLastSyncedAt(new Date().toISOString());
+      }
+    });
   };
 
   const handlePublicLostReport = (item: LostFoundItem) => {
-    updatePortal((prev) => ({
-      ...prev,
-      lostFound: [item, ...prev.lostFound],
-    }));
+    const next: PortalState = {
+      ...portalStateRef.current,
+      lostFound: [item, ...portalStateRef.current.lostFound],
+    };
+    portalStateRef.current = next;
+    setPortalState(next);
+    savePortalState(next);
+    void submitPublicItemToCloud('lost-found', item, next).then(({ synced, mode }) => {
+      if (synced) {
+        setSyncMode(mode);
+        setLastSyncedAt(new Date().toISOString());
+      }
+    });
   };
 
   const handlePublicTicket = (ticket: GrievanceTicket) => {
-    updatePortal((prev) => ({
-      ...prev,
-      tickets: [ticket, ...prev.tickets],
-    }));
+    const next: PortalState = {
+      ...portalStateRef.current,
+      tickets: [ticket, ...portalStateRef.current.tickets],
+    };
+    portalStateRef.current = next;
+    setPortalState(next);
+    savePortalState(next);
+    void submitPublicItemToCloud('tickets', ticket, next).then(({ synced, mode }) => {
+      if (synced) {
+        setSyncMode(mode);
+        setLastSyncedAt(new Date().toISOString());
+      }
+    });
   };
 
   // Hub Handlers
@@ -751,6 +881,31 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-2.5 shrink-0">
+                <span
+                  className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border ${
+                    syncMode === 'cloud' || syncMode === 'server'
+                      ? 'bg-[#facc15]/20 text-blue-950 dark:text-[#fde047] border-[#eab308]/60'
+                      : 'bg-blue-50 dark:bg-slate-800 text-blue-900 dark:text-slate-300 border-blue-200 dark:border-slate-700'
+                  }`}
+                >
+                  <Cloud className="w-3.5 h-3.5" />
+                  <span>
+                    {syncMode === 'cloud'
+                      ? 'Cloud Sync Connected'
+                      : syncMode === 'server'
+                      ? 'Shared Server Sync'
+                      : 'Local Preview'}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  disabled={syncing}
+                  onClick={() => void handlePublishNow()}
+                  className="px-3 py-2 text-xs font-extrabold bg-[#facc15] hover:bg-[#eab308] text-slate-950 rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
+                >
+                  <Cloud className="w-3.5 h-3.5" />
+                  <span>{syncing ? 'Syncing...' : 'Publish to All'}</span>
+                </button>
                 <ThemeToggle theme={theme} onToggle={toggleTheme} compact />
                 {currentUser && (
                   <button
@@ -776,6 +931,17 @@ export default function App() {
                   portal={portalState}
                   onUpdatePortal={updatePortal}
                   onNotify={notify}
+                  syncMode={syncMode}
+                  syncing={syncing}
+                  lastSyncedAt={lastSyncedAt}
+                  onPublishNow={handlePublishNow}
+                  onPullCloudNow={() => handlePullCloudNow(false)}
+                  onImportSnapshot={handleImportSnapshot}
+                  authToken={cmsSession?.token || getCachedIdToken() || null}
+                  currentAdminUsername={cmsSession?.username || currentUser?.username || 'admin'}
+                  onCredentialsUpdated={(newUsername, newToken) =>
+                    setCmsSession({ username: newUsername, token: newToken })
+                  }
                 />
               )}
 
@@ -1092,8 +1258,9 @@ export default function App() {
       {/* Clean NNCHS SSLG Footer (Admin-Editable Learner Services & Contact Info) */}
       <footer className="no-print bg-[#0f172a] dark:bg-slate-950 text-slate-300 border-t-4 border-[#eab308] mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 grid grid-cols-1 md:grid-cols-12 gap-8 text-xs">
-          <div className="md:col-span-5 space-y-3">
+          <div className="md:col-span-5 space-y-4">
             <div className="flex items-center gap-3">
+              <NNCHSSchoolSeal className="w-11 h-11 shrink-0" />
               <SSLGCrest className="w-11 h-11 shrink-0" />
               <div>
                 <p className="text-sm font-extrabold text-white">
@@ -1104,10 +1271,6 @@ export default function App() {
                 </p>
               </div>
             </div>
-            <p className="text-slate-400 leading-relaxed">
-              Official Website of the NNCHS Supreme Secondary Learner Government · Nabunturan, Davao
-              de Oro · Schools Division of Davao de Oro.
-            </p>
             <a
               href={portalState.messengerGroupUrl}
               target="_blank"
@@ -1190,8 +1353,7 @@ export default function App() {
           </div>
         </div>
         <div className="border-t border-slate-800/90 py-4 px-4 text-center text-[11px] text-slate-400">
-          NNCHS Supreme Secondary Learner Government · SY {portalState.schoolYear} · Nabunturan, Davao
-          de Oro
+          NNCHS Supreme Secondary Learner Government · SY {portalState.schoolYear}
         </div>
       </footer>
 

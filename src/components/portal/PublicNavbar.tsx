@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Lock, Menu, X } from 'lucide-react';
 import type { PortalSectionId } from '../../lib/portalStore.ts';
-import { SSLGCrest } from '../SSLGCrest.tsx';
+import { NNCHSSchoolSeal, SSLGCrest } from '../SSLGCrest.tsx';
 import { ThemeToggle, type ThemeMode } from '../ThemeToggle.tsx';
 
 export interface PortalJumpTarget {
@@ -84,38 +84,37 @@ export function PublicNavbar({
 
   return (
     <header className="no-print sticky top-0 z-40">
-      {/* Top Institutional Utility Bar — Exact Requested Copy Only */}
+      {/* Top Institutional Utility Bar — Clean SY & PST Clock Only */}
       <div className="bg-[#0f172a] dark:bg-slate-950 text-slate-100 border-b border-blue-900/60">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-9 flex items-center justify-between gap-4 text-[11px] sm:text-xs">
-          <p className="truncate font-medium">
-            <span className="font-bold text-[#fde047]">SY {schoolYear}</span>
-            <span className="mx-2 text-blue-500">|</span>
-            <span>Nabunturan, Davao de Oro · Schools Division of Davao de Oro</span>
-          </p>
+          <p className="font-bold text-[#fde047] whitespace-nowrap">SY {schoolYear}</p>
           <span className="font-mono-code text-yellow-300 tabular-nums whitespace-nowrap shrink-0">
             {manilaClock}
           </span>
         </div>
       </div>
 
-      {/* Main Sticky Navigation */}
-      <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-blue-100 dark:border-slate-800 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between gap-4">
-          {/* Official Brand Title */}
+      {/* Main Sticky Glassmorphic Navigation */}
+      <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-blue-900/10 dark:border-yellow-400/20 shadow-xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between gap-3">
+          {/* Official Brand Title & Seals */}
           <button
             type="button"
             onClick={() => handleJump('home')}
-            className="flex items-center gap-3 text-left min-w-0 cursor-pointer group shrink-0 max-w-[340px] sm:max-w-md lg:max-w-sm xl:max-w-md"
+            className="flex items-center gap-2.5 text-left min-w-0 cursor-pointer group flex-1 xl:flex-initial xl:max-w-md"
           >
-            <SSLGCrest className="w-10 h-10 shrink-0" />
-            <span className="text-xs sm:text-sm font-extrabold tracking-tight text-blue-950 dark:text-white leading-snug group-hover:text-blue-700 dark:group-hover:text-yellow-300 transition-colors line-clamp-2">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <NNCHSSchoolSeal className="w-8 h-8 sm:w-9 sm:h-9" />
+              <SSLGCrest className="w-8 h-8 sm:w-9 sm:h-9" />
+            </div>
+            <span className="text-[11px] sm:text-xs font-extrabold tracking-tight text-blue-950 dark:text-white leading-snug group-hover:text-blue-700 dark:group-hover:text-yellow-300 transition-colors line-clamp-2">
               Nabunturan National Comprehensive High School — Supreme Secondary Learner Government
             </span>
           </button>
 
           {/* Desktop Navigation Links */}
           <nav
-            className="hidden xl:flex items-center gap-1"
+            className="hidden xl:flex items-center gap-0.5 shrink-0"
             aria-label="Primary website navigation"
           >
             {NAV_LINKS.map((link) => {
@@ -146,17 +145,20 @@ export function PublicNavbar({
             <button
               type="button"
               onClick={onOpenHub}
-              className="px-3.5 py-2 rounded-lg bg-[#1e3a8a] hover:bg-[#1d4ed8] dark:bg-blue-700 dark:hover:bg-blue-600 text-white text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 border border-blue-900 dark:border-blue-500"
+              className="px-3 sm:px-3.5 py-2 rounded-lg bg-[#1e3a8a] hover:bg-[#1d4ed8] dark:bg-blue-700 dark:hover:bg-blue-600 text-white text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 border border-blue-900 dark:border-blue-500"
             >
               <Lock className="w-3.5 h-3.5 text-[#fde047] shrink-0" />
-              <span>{isAuthenticated ? 'Admin Hub Open' : 'Admin Portal'}</span>
+              <span className="hidden sm:inline">
+                {isAuthenticated ? 'Admin Hub Open' : 'Admin Portal'}
+              </span>
+              <span className="sm:hidden">{isAuthenticated ? 'Hub' : 'Admin'}</span>
             </button>
 
             <button
               type="button"
               onClick={() => setMobileMenuOpen((v) => !v)}
               aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
-              className="xl:hidden p-2 rounded-lg border border-blue-200 dark:border-slate-700 text-blue-950 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 cursor-pointer"
+              className="xl:hidden p-2 rounded-lg border border-blue-200 dark:border-slate-700 text-blue-950 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 cursor-pointer shrink-0"
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -165,7 +167,7 @@ export function PublicNavbar({
 
         {/* Mobile / Tablet Navigation Drawer */}
         {mobileMenuOpen && (
-          <div className="xl:hidden border-t border-blue-100 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-4 space-y-3">
+          <div className="xl:hidden border-t border-blue-900/10 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-4 py-4 space-y-3">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                 Theme Mode
@@ -189,6 +191,18 @@ export function PublicNavbar({
                 </button>
               ))}
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onOpenHub();
+              }}
+              className="w-full py-2.5 px-4 rounded-xl bg-[#facc15] hover:bg-[#eab308] text-slate-950 text-xs font-extrabold inline-flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>{isAuthenticated ? 'Open Admin Hub' : 'Open Admin Portal'}</span>
+            </button>
           </div>
         )}
       </div>

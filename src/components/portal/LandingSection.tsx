@@ -13,9 +13,11 @@ import {
 } from 'lucide-react';
 import {
   DEFAULT_YORP_LOGO_PATH,
+  type AboutPhotoItem,
   type BulletinPost,
   type PortalState,
 } from '../../lib/portalStore.ts';
+import { NNCHSSchoolSeal } from '../SSLGCrest.tsx';
 import type { PortalJumpTarget } from './PublicNavbar.tsx';
 
 function AnimatedCounter({ value, suffix = '' }: { value: number; suffix?: string }) {
@@ -73,6 +75,7 @@ export function LandingSection({
   const slides = portal.heroSlides.length > 0 ? portal.heroSlides : [];
   const [slideIdx, setSlideIdx] = useState(0);
   const [activePostModal, setActivePostModal] = useState<BulletinPost | null>(null);
+  const [activeAboutPhoto, setActiveAboutPhoto] = useState<AboutPhotoItem | null>(null);
   const [yorpImgFailed, setYorpImgFailed] = useState(false);
 
   useEffect(() => {
@@ -93,13 +96,16 @@ export function LandingSection({
   }, [slides.length, slideIdx]);
 
   useEffect(() => {
-    if (!activePostModal) return;
+    if (!activePostModal && !activeAboutPhoto) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setActivePostModal(null);
+      if (e.key === 'Escape') {
+        setActivePostModal(null);
+        setActiveAboutPhoto(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activePostModal]);
+  }, [activePostModal, activeAboutPhoto]);
 
   const currentSlide = slides[slideIdx] || slides[0];
   const featuredPost = portal.bulletinPosts.find((p) => p.featured) || portal.bulletinPosts[0];
@@ -128,7 +134,7 @@ export function LandingSection({
                 type="button"
                 onClick={() => setSlideIdx((prev) => (prev - 1 + slides.length) % slides.length)}
                 aria-label="Previous slide"
-                className="absolute left-3 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-[#0f172a]/70 hover:bg-[#1e3a8a] text-white border border-white/20 cursor-pointer transition-colors"
+                className="absolute left-3 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-[#0f172a]/70 hover:bg-[#1e3a8a] text-white border border-white/20 backdrop-blur-sm cursor-pointer transition-colors"
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
@@ -136,7 +142,7 @@ export function LandingSection({
                 type="button"
                 onClick={() => setSlideIdx((prev) => (prev + 1) % slides.length)}
                 aria-label="Next slide"
-                className="absolute right-3 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-[#0f172a]/70 hover:bg-[#1e3a8a] text-white border border-white/20 cursor-pointer transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-[#0f172a]/70 hover:bg-[#1e3a8a] text-white border border-white/20 backdrop-blur-sm cursor-pointer transition-colors"
               >
                 <ChevronRight className="w-5 h-5" />
               </button>
@@ -175,7 +181,7 @@ export function LandingSection({
               <button
                 type="button"
                 onClick={() => onNavigate({ section: 'reporting' })}
-                className="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/25 font-bold text-xs sm:text-sm inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+                className="px-4 py-3 rounded-xl bg-white/15 hover:bg-white/25 backdrop-blur-sm text-white border border-white/25 font-bold text-xs sm:text-sm inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
               >
                 <ShieldCheck className="w-4 h-4 text-[#fde047] shrink-0" />
                 <span>Grievance &amp; Welfare Desk</span>
@@ -204,7 +210,7 @@ export function LandingSection({
       {/* Editable Campus Advisory Banner & Scrolling Ticker */}
       <div className="space-y-3">
         {portal.campusAdvisory && (
-          <div className="rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="rounded-xl backdrop-blur-md bg-blue-50/80 dark:bg-blue-950/50 border border-blue-200/80 dark:border-blue-800/80 px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start sm:items-center gap-3">
               <Megaphone className="w-5 h-5 text-blue-800 dark:text-[#fde047] shrink-0 mt-0.5 sm:mt-0" />
               <p className="text-xs sm:text-sm font-semibold text-blue-950 dark:text-slate-100">
@@ -224,7 +230,7 @@ export function LandingSection({
         {portal.tickerMessages.length > 0 && (
           <div
             aria-label="Live Campus Advisory Ticker"
-            className="rounded-xl bg-[#facc15] text-slate-950 border border-[#eab308] overflow-hidden flex items-center"
+            className="rounded-xl bg-[#facc15] text-slate-950 border border-[#eab308] overflow-hidden flex items-center shadow-xs"
           >
             <div className="px-4 py-2.5 bg-[#1e3a8a] text-white text-xs font-extrabold uppercase tracking-wider shrink-0">
               Campus Advisory
@@ -245,106 +251,155 @@ export function LandingSection({
         )}
       </div>
 
-      {/* 2. ABOUT THE SSLG & NYC YORP RECOGNITION + EDITABLE IMPACT NUMBERS */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 sm:p-8 space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-yellow-300">
-                Student Governance Profile
-              </p>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-blue-950 dark:text-white tracking-tight mt-0.5">
-                About the SSLG
-              </h2>
-            </div>
-
-            {/* NYC YORP Official Logo Badge */}
-            <div className="flex items-center gap-3 bg-blue-50/70 dark:bg-slate-800/80 border border-blue-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 shrink-0">
-              {!yorpImgFailed ? (
-                <img
-                  src={portal.yorpLogoUrl || DEFAULT_YORP_LOGO_PATH}
-                  alt="National Youth Commission YORP Logo"
-                  referrerPolicy="no-referrer"
-                  onError={() => setYorpImgFailed(true)}
-                  className="w-12 h-12 object-contain shrink-0"
-                />
-              ) : (
-                <div className="w-12 h-12 rounded-lg bg-[#1e3a8a] text-[#fde047] font-extrabold text-xs flex items-center justify-center shrink-0">
-                  YORP
+      {/* 2. ABOUT THE NNCHS-SSLG & NYC YORP RECOGNITION + EDITABLE IMPACT NUMBERS */}
+      <section className="space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+          <div className="lg:col-span-7 backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 sm:p-8 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-blue-900/10 dark:border-slate-800 pb-5">
+              <div className="flex items-center gap-3.5">
+                <NNCHSSchoolSeal className="w-12 h-12 shrink-0" />
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-yellow-300">
+                    Learner Governance Profile
+                  </p>
+                  <h2 className="text-2xl sm:text-3xl font-extrabold text-blue-950 dark:text-white tracking-tight mt-0.5">
+                    About the NNCHS-SSLG
+                  </h2>
                 </div>
-              )}
-              <div className="text-left">
-                <p className="text-[11px] font-extrabold text-blue-950 dark:text-white">
-                  NYC YORP Registered
-                </p>
-                <p className="text-[11px] font-semibold text-blue-700 dark:text-yellow-300">
-                  Renewed August 3, 2023
-                </p>
+              </div>
+
+              {/* NYC YORP Official Logo Badge */}
+              <div className="flex items-center gap-3 bg-blue-50/75 dark:bg-slate-800/80 border border-blue-200/80 dark:border-slate-700 rounded-xl px-3.5 py-2.5 shrink-0">
+                {!yorpImgFailed ? (
+                  <img
+                    src={portal.yorpLogoUrl || DEFAULT_YORP_LOGO_PATH}
+                    alt="National Youth Commission YORP Logo"
+                    referrerPolicy="no-referrer"
+                    onError={() => setYorpImgFailed(true)}
+                    className="w-12 h-12 object-contain shrink-0"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded-lg bg-[#1e3a8a] text-[#fde047] font-extrabold text-xs flex items-center justify-center shrink-0">
+                    YORP
+                  </div>
+                )}
+                <div className="text-left">
+                  <p className="text-[11px] font-extrabold text-blue-950 dark:text-white">
+                    NYC YORP Registered
+                  </p>
+                  <p className="text-[11px] font-semibold text-blue-700 dark:text-yellow-300">
+                    Renewed August 3, 2023
+                  </p>
+                </div>
               </div>
             </div>
+
+            <blockquote className="text-sm sm:text-base font-bold text-blue-950 dark:text-white leading-relaxed">
+              &ldquo;The Nabunturan National Comprehensive High School - Supreme Secondary Learner
+              Government is the highest governing and representative body for all learners.&rdquo;
+            </blockquote>
+
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              Serving across Junior and Senior High School, the NNCHS SSLG champions learner welfare,
+              participatory learner leadership, inclusive campus development, and transparent
+              democratic representation inside every grade level and recognized learner club.
+            </p>
+
+            <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed bg-blue-50/65 dark:bg-slate-800/65 border border-blue-100 dark:border-slate-700 rounded-xl p-4">
+              Solidifying its commitment to youth-led governance, the SSLG is officially recognized
+              as a Registered Youth Organization by the National Youth Commission (NYC) through the
+              Youth Organization Registration Program (YORP). On August 3, 2023, the SSLG
+              successfully renewed its YORP registration, continuing its steadfast mission to
+              champion key advocacies in{' '}
+              <strong className="text-blue-900 dark:text-yellow-300">
+                {YORP_ADVOCACIES.join(', ')}
+              </strong>
+              .
+            </p>
           </div>
 
-          <p className="text-sm sm:text-base font-bold text-blue-950 dark:text-white leading-relaxed">
-            The Nabunturan National Comprehensive High School - Supreme Secondary Learner Government
-            is the highest governing and representative body for all learners.
-          </p>
-
-          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-            Serving across Junior and Senior High School, the NNCHS SSLG champions learner welfare,
-            participatory student leadership, inclusive campus development, and transparent
-            democratic representation inside every grade level and recognized student club.
-          </p>
-
-          <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed bg-blue-50/60 dark:bg-slate-800/60 border border-blue-100 dark:border-slate-700 rounded-xl p-4">
-            Solidifying its commitment to youth-led governance, the SSLG is officially recognized as
-            a Registered Youth Organization by the National Youth Commission (NYC) through the Youth
-            Organization Registration Program (YORP). On August 3, 2023, the SSLG successfully
-            renewed its YORP registration, continuing its steadfast mission to champion key
-            advocacies in{' '}
-            <strong className="text-blue-900 dark:text-yellow-300">
-              {YORP_ADVOCACIES.join(', ')}
-            </strong>
-            .
-          </p>
-        </div>
-
-        {/* Admin-Editable Impact Cards */}
-        <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {portal.impactStats.map((stat, idx) => (
-            <div
-              key={stat.id}
-              className={`rounded-2xl border p-6 flex flex-col justify-between ${
-                idx === 0
-                  ? 'bg-[#1e3a8a] text-white border-blue-900'
-                  : 'bg-white dark:bg-slate-900 border-blue-100 dark:border-slate-800'
-              }`}
-            >
-              <p
-                className={`text-xs font-bold uppercase tracking-wider ${
-                  idx === 0 ? 'text-[#fde047]' : 'text-blue-700 dark:text-yellow-300'
+          {/* Admin-Editable Impact Cards */}
+          <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {portal.impactStats.map((stat, idx) => (
+              <div
+                key={stat.id}
+                className={`rounded-2xl border p-6 flex flex-col justify-between shadow-sm ${
+                  idx === 0
+                    ? 'bg-[#1e3a8a] text-white border-blue-900'
+                    : 'backdrop-blur-md bg-white/75 dark:bg-slate-900/75 border-blue-900/10 dark:border-yellow-400/20'
                 }`}
               >
-                SY {portal.schoolYear}
-              </p>
-              <div className="mt-4">
                 <p
-                  className={`text-3xl sm:text-4xl font-extrabold tracking-tight ${
-                    idx === 0 ? 'text-white' : 'text-blue-950 dark:text-white'
+                  className={`text-xs font-bold uppercase tracking-wider ${
+                    idx === 0 ? 'text-[#fde047]' : 'text-blue-700 dark:text-yellow-300'
                   }`}
                 >
-                  <AnimatedCounter value={stat.value} suffix={stat.suffix || ''} />
+                  SY {portal.schoolYear}
                 </p>
-                <p
-                  className={`text-xs font-semibold mt-1.5 ${
-                    idx === 0 ? 'text-blue-100' : 'text-slate-600 dark:text-slate-300'
-                  }`}
-                >
-                  {stat.label}
-                </p>
+                <div className="mt-4">
+                  <p
+                    className={`text-3xl sm:text-4xl font-extrabold tracking-tight ${
+                      idx === 0 ? 'text-white' : 'text-blue-950 dark:text-white'
+                    }`}
+                  >
+                    <AnimatedCounter value={stat.value} suffix={stat.suffix || ''} />
+                  </p>
+                  <p
+                    className={`text-xs font-semibold mt-1.5 ${
+                      idx === 0 ? 'text-blue-100' : 'text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    {stat.label}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
+
+        {/* Horizontal Scrollable Photos Strip / Gallery inside About Section */}
+        {portal.aboutPhotos.length > 0 && (
+          <div className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-5 sm:p-6 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-[#fde047]">
+                  NNCHS-SSLG Visual Highlights
+                </p>
+                <h3 className="text-base font-extrabold text-blue-950 dark:text-white">
+                  Campus &amp; Learner Governance Photo Gallery
+                </h3>
+              </div>
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                Scroll horizontally →
+              </span>
+            </div>
+
+            <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-2">
+              {portal.aboutPhotos.map((photo) => (
+                <button
+                  key={photo.id}
+                  type="button"
+                  onClick={() => setActiveAboutPhoto(photo)}
+                  className="snap-start shrink-0 w-64 sm:w-72 rounded-xl overflow-hidden border border-blue-900/15 dark:border-yellow-400/20 bg-white dark:bg-slate-950 text-left group cursor-pointer transition-transform hover:-translate-y-0.5"
+                >
+                  <div className="h-40 bg-[#0f172a] overflow-hidden">
+                    <img
+                      src={photo.url}
+                      alt={photo.caption}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  </div>
+                  <div className="px-3.5 py-2.5">
+                    <p className="text-xs font-bold text-blue-950 dark:text-slate-100 line-clamp-2">
+                      {photo.caption}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* 3. OFFICIAL BULLETIN BOARD & MESSENGER GROUP LINK */}
@@ -374,7 +429,7 @@ export function LandingSection({
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {featuredPost && (
-            <article className="lg:col-span-5 bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 overflow-hidden flex flex-col justify-between">
+            <article className="lg:col-span-5 backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm overflow-hidden flex flex-col justify-between">
               {featuredPost.photoUrl && (
                 <img
                   src={featuredPost.photoUrl}
@@ -432,7 +487,7 @@ export function LandingSection({
               .map((post) => (
                 <article
                   key={post.id}
-                  className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 overflow-hidden flex flex-col justify-between hover:border-blue-400 dark:hover:border-blue-600 transition-colors"
+                  className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm overflow-hidden flex flex-col justify-between hover:border-blue-400 dark:hover:border-yellow-300 transition-colors"
                 >
                   {post.photoUrl && (
                     <img
@@ -482,6 +537,41 @@ export function LandingSection({
           </div>
         </div>
       </section>
+
+      {/* About Gallery Lightbox Modal */}
+      {activeAboutPhoto && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setActiveAboutPhoto(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={activeAboutPhoto.caption}
+        >
+          <div
+            className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3.5 bg-[#1e3a8a] text-white flex items-center justify-between gap-4">
+              <h3 className="text-sm font-bold truncate">{activeAboutPhoto.caption}</h3>
+              <button
+                type="button"
+                onClick={() => setActiveAboutPhoto(null)}
+                aria-label="Close photo preview"
+                className="p-1 text-blue-100 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
+              <img
+                src={activeAboutPhoto.url}
+                alt={activeAboutPhoto.caption}
+                className="max-h-[70vh] rounded-xl object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bulletin Reader Modal */}
       {activePostModal && (

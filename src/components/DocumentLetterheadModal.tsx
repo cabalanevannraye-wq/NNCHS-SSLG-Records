@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, Copy, Download, Printer, X } from 'lucide-react';
 import { downloadResolutionPdf } from '../lib/downloadEngine.ts';
 import type { LegislativeRecord } from '../lib/portalStore.ts';
-import { SSLGCrest } from './SSLGCrest.tsx';
+import { NNCHSSchoolSeal, SSLGCrest } from './SSLGCrest.tsx';
 
 export interface LetterheadDocumentPayload {
   title: string;
@@ -139,7 +139,10 @@ export function DocumentLetterheadModal({
         {/* Crisp White Letterhead Sheet (immune to Dark Mode) */}
         <div className="flex-1 overflow-y-auto bg-white text-slate-900 p-6 sm:p-10 space-y-6">
           <div className="border-b-2 border-blue-900 pb-4 flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
-            <SSLGCrest className="w-16 h-16 shrink-0" />
+            <div className="flex items-center gap-2 shrink-0">
+              <NNCHSSchoolSeal className="w-14 h-14" />
+              <SSLGCrest className="w-14 h-14" />
+            </div>
             <div className="flex-1 min-w-0">
               <h4 className="text-base sm:text-lg font-extrabold text-blue-950 tracking-tight">
                 NABUNTURAN NATIONAL COMPREHENSIVE HIGH SCHOOL

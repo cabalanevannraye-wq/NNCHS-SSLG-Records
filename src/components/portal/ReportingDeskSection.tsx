@@ -163,11 +163,11 @@ export function ReportingDeskSection({
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Guided Report Submission Form */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 space-y-5">
+        <div className="lg:col-span-7 backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
-            <h3 className="text-base font-extrabold text-blue-950 dark:text-white flex items-center gap-2">
+            <h3 className="text-base font-extrabold uppercase tracking-wide text-blue-950 dark:text-white flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-blue-700 dark:text-[#fde047]" />
-              <span>Submit New Report</span>
+              <span>SUBMIT NEW REPORT</span>
             </h3>
 
             <button
@@ -217,8 +217,8 @@ export function ReportingDeskSection({
               <p className="text-sm leading-relaxed text-blue-50">
                 Your report has been received and will be reviewed by the SSLG.{' '}
                 <strong className="text-[#fde047]">
-                  Please notify your class adviser while we will also coordinate with the Learner
-                  Formation Officer in your grade level.
+                  Please notify your adviser while we will also coordinate to the Learner Formation
+                  Officer in your grade level.
                 </strong>
               </p>
             </div>
@@ -280,10 +280,10 @@ export function ReportingDeskSection({
 
             {/* Conditional Guided Welfare / Anti-Bullying Fields */}
             {category === 'Student Welfare / Anti-Bullying' ? (
-              <div className="space-y-4 p-4 rounded-xl bg-blue-50/70 dark:bg-slate-800/70 border border-blue-200 dark:border-slate-700">
+              <div className="space-y-4 p-4 rounded-xl bg-blue-50/75 dark:bg-slate-800/75 border border-blue-200 dark:border-slate-700">
                 <div>
-                  <label className="block text-xs font-bold text-blue-950 dark:text-[#fde047] mb-1.5">
-                    1. What happened? *
+                  <label className="block text-xs font-extrabold uppercase tracking-wide text-blue-950 dark:text-[#fde047] mb-1.5">
+                    1. WHAT HAPPENED *
                   </label>
                   <textarea
                     rows={3}
@@ -296,8 +296,8 @@ export function ReportingDeskSection({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-blue-950 dark:text-[#fde047] mb-1.5">
-                    2. Who did it? *
+                  <label className="block text-xs font-extrabold uppercase tracking-wide text-blue-950 dark:text-[#fde047] mb-1.5">
+                    2. WHO DID IT *
                   </label>
                   <input
                     type="text"
@@ -310,8 +310,8 @@ export function ReportingDeskSection({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-blue-950 dark:text-[#fde047] mb-1.5">
-                    3. What do you think should be done next / What help do you need? *
+                  <label className="block text-xs font-extrabold uppercase tracking-wide text-blue-950 dark:text-[#fde047] mb-1.5">
+                    3. WHAT HELP YOU NEED *
                   </label>
                   <textarea
                     rows={2}
@@ -411,7 +411,7 @@ export function ReportingDeskSection({
 
         {/* Right Column: Private Status Checker + Public Approved Concerns Feed */}
         <div className="lg:col-span-5 space-y-6">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 space-y-4">
+          <div className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 space-y-4">
             <h3 className="text-base font-extrabold text-blue-950 dark:text-white flex items-center gap-2">
               <FileSearch className="w-5 h-5 text-blue-700 dark:text-[#fde047]" />
               <span>Check Your Report Status</span>
@@ -466,7 +466,7 @@ export function ReportingDeskSection({
           </div>
 
           {/* Public Approved Concerns Feed (ONLY Approved Reports) */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 space-y-4">
+          <div className="backdrop-blur-md bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-blue-900/10 dark:border-yellow-400/20 shadow-sm p-6 space-y-4">
             <div>
               <h3 className="text-base font-extrabold text-blue-950 dark:text-white">
                 Approved Public Concerns &amp; Actions

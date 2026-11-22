@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { jsPDF } from 'jspdf';
 import type {
   CalendarEventItem,
   LegislativeRecord,
@@ -79,34 +79,8 @@ export function downloadOriginalPrintFile(
   return false;
 }
 
-function wrapTextLines(text: string, maxChars: number): string[] {
-  const paragraphs = text.replace(/\r/g, '').split('\n');
-  const lines: string[] = [];
-  for (const para of paragraphs) {
-    const trimmed = para.trimEnd();
-    if (!trimmed) {
-      lines.push('');
-      continue;
-    }
-    const words = trimmed.split(/\s+/);
-    let current = '';
-    for (const w of words) {
-      if (!current) {
-        current = w;
-      } else if (current.length + 1 + w.length <= maxChars) {
-        current += ` ${w}`;
-      } else {
-        lines.push(current);
-        current = w;
-      }
-    }
-    if (current) lines.push(current);
-  }
-  return lines;
-}
-
 /**
- * Guaranteed real binary .pdf download for any Official Resolution using pdf-lib
+ * Guaranteed real binary .pdf download for any Official Resolution using jsPDF
  * (or the admin's uploaded binary .pdf attachment directly).
  */
 export async function downloadResolutionPdf(
@@ -129,100 +103,78 @@ export async function downloadResolutionPdf(
   }
 
   try {
-    const pdfDoc = await PDFDocument.create();
-    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
-
-    let page = pdfDoc.addPage([612, 792]); // US Letter
-    const { width, height } = page.getSize();
+    const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 52;
-    let y = height - 56;
+    const contentWidth = pageWidth - margin * 2;
+    let y = 52;
 
-    // Header Blue Band + Compre Yellow Accent Line
-    page.drawRectangle({
-      x: margin,
-      y: y - 44,
-      width: width - margin * 2,
-      height: 52,
-      color: rgb(30 / 255, 58 / 255, 138 / 255),
-    });
-    page.drawRectangle({
-      x: margin,
-      y: y - 48,
-      width: width - margin * 2,
-      height: 4,
-      color: rgb(250 / 255, 204 / 255, 21 / 255),
-    });
+    // Blue Header Band + Compre Yellow Accent Line
+    doc.setFillColor(30, 58, 138);
+    doc.rect(margin, y, contentWidth, 54, 'F');
+    doc.setFillColor(250, 204, 21);
+    doc.rect(margin, y + 54, contentWidth, 4, 'F');
 
-    page.drawText('NABUNTURAN NATIONAL COMPREHENSIVE HIGH SCHOOL', {
-      x: margin + 14,
-      y: y - 14,
-      size: 11,
-      font: fontBold,
-      color: rgb(1, 1, 1),
-    });
-    page.drawText('SUPREME SECONDARY LEARNER GOVERNMENT (NNCHS SSLG)', {
-      x: margin + 14,
-      y: y - 31,
-      size: 9.5,
-      font: fontBold,
-      color: rgb(253 / 255, 224 / 255, 71 / 255),
-    });
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('NABUNTURAN NATIONAL COMPREHENSIVE HIGH SCHOOL', margin + 14, y + 22);
 
-    y -= 72;
+    doc.setTextColor(253, 224, 71);
+    doc.setFontSize(9.5);
+    doc.text('SUPREME SECONDARY LEARNER GOVERNMENT (NNCHS SSLG)', margin + 14, y + 40);
 
-    page.drawText(`${record.numberCode}  |  Date Passed: ${record.datePassed}`, {
-      x: margin,
-      y,
-      size: 10,
-      font: fontBold,
-      color: rgb(30 / 255, 58 / 255, 138 / 255),
-    });
-    y -= 18;
+    y += 82;
 
-    const titleLines = wrapTextLines(record.title, 76);
-    for (const tl of titleLines) {
-      page.drawText(tl, {
-        x: margin,
-        y,
-        size: 13,
-        font: fontBold,
-        color: rgb(15 / 255, 23 / 255, 42 / 255),
-      });
-      y -= 17;
+    doc.setTextColor(30, 58, 138);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(`${record.numberCode}  |  Date Passed: ${record.datePassed}`, margin, y);
+    y += 20;
+
+    doc.setTextColor(15, 23, 42);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    const wrappedTitle = doc.splitTextToSize(record.title, contentWidth) as string[];
+    doc.text(wrappedTitle, margin, y);
+    y += wrappedTitle.length * 17 + 4;
+
+    doc.setTextColor(71, 85, 105);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.text(`Sponsor: ${record.sponsor}`, margin, y);
+    y += 22;
+
+    doc.setDrawColor(203, 213, 225);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 18;
+
+    doc.setTextColor(30, 41, 59);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10.5);
+    const bodyText = `${record.summary}\n\n${record.fullText}`.replace(/\r/g, '');
+    const paragraphs = bodyText.split('\n');
+
+    for (const para of paragraphs) {
+      if (!para.trim()) {
+        y += 8;
+        continue;
+      }
+      const lines = doc.splitTextToSize(para, contentWidth) as string[];
+      for (const line of lines) {
+        if (y > pageHeight - 60) {
+          doc.addPage();
+          y = 56;
+        }
+        doc.text(line, margin, y);
+        y += 14.5;
+      }
     }
 
-    page.drawText(`Sponsor: ${record.sponsor}`, {
-      x: margin,
-      y: y - 2,
-      size: 9.5,
-      font: fontRegular,
-      color: rgb(71 / 255, 85 / 255, 105 / 255),
-    });
-    y -= 24;
-
-    const bodyLines = wrapTextLines(`${record.summary}\n\n${record.fullText}`, 86);
-    for (const line of bodyLines) {
-      if (y < 60) {
-        page = pdfDoc.addPage([612, 792]);
-        y = page.getSize().height - 54;
-      }
-      if (line) {
-        page.drawText(line, {
-          x: margin,
-          y,
-          size: 10,
-          font: fontRegular,
-          color: rgb(30 / 255, 41 / 255, 59 / 255),
-        });
-      }
-      y -= 14;
-    }
-
-    const pdfBytes = await pdfDoc.save();
-    const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    return triggerBlobOrUriDownload(targetFilename, url, true, onNotify);
+    doc.save(targetFilename);
+    onNotify?.(`Download started: ${targetFilename}`);
+    return true;
   } catch {
     onNotify?.('PDF generation encountered an issue. Opening printable letterhead instead.');
     return false;

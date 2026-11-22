@@ -25,7 +25,7 @@ import {
   usernameOrEmailToAuthEmail,
 } from '../firebase.ts';
 import { buildApiUrl } from '../lib/api.ts';
-import { SSLGCrest } from './SSLGCrest.tsx';
+import { NNCHSSchoolSeal, SSLGCrest } from './SSLGCrest.tsx';
 
 export interface CmsAdminSession {
   username: string;
@@ -256,8 +256,8 @@ export function LoginView({
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] dark:bg-[#0b1120] flex flex-col items-center justify-center p-4 sm:p-6">
-      <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-blue-200 dark:border-slate-800 shadow-lg p-8 sm:p-10">
+    <div className="min-h-screen bg-gradient-to-br from-[#f8fafc] via-blue-50/60 to-yellow-50/40 dark:from-[#0b1120] dark:via-slate-950 dark:to-blue-950/40 flex flex-col items-center justify-center p-4 sm:p-6">
+      <div className="w-full max-w-md backdrop-blur-md bg-white/85 dark:bg-slate-900/80 rounded-2xl border border-blue-900/15 dark:border-yellow-400/20 shadow-xl p-8 sm:p-10">
         {onReturnToPortal && (
           <div className="mb-4">
             <button
@@ -270,7 +270,10 @@ export function LoginView({
           </div>
         )}
         <div className="flex flex-col items-center text-center mb-8">
-          <SSLGCrest className="w-20 h-20 mb-4" />
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <NNCHSSchoolSeal className="w-16 h-16" />
+            <SSLGCrest className="w-16 h-16" />
+          </div>
           <h1 className="text-2xl font-extrabold tracking-tight text-blue-950 dark:text-white">
             NNCHS SSLG Admin Portal
           </h1>
