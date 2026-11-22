@@ -60,9 +60,11 @@ const YORP_ADVOCACIES = [
   'EDUCATION',
   'ECONOMIC EMPOWERMENT',
   'SOCIAL INCLUSION',
-  'PEACE BUILDING & SECURITY',
+  'PEACE BUILDING AND SECURITY',
   'GOVERNANCE',
   'ACTIVE LEADERSHIP',
+  'GLOBAL MOBILITY',
+  'AGRICULTURE',
 ];
 
 export function LandingSection({
@@ -294,15 +296,13 @@ export function LandingSection({
               </div>
             </div>
 
-            <blockquote className="text-sm sm:text-base font-bold text-blue-950 dark:text-white leading-relaxed">
-              &ldquo;The Nabunturan National Comprehensive High School - Supreme Secondary Learner
-              Government is the highest governing and representative body for all learners.&rdquo;
-            </blockquote>
-
-            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-              Serving across Junior and Senior High School, the NNCHS SSLG champions learner welfare,
-              participatory learner leadership, inclusive campus development, and transparent
-              democratic representation inside every grade level and recognized learner club.
+            <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed font-medium">
+              The Nabunturan National Comprehensive High School – Supreme Secondary Learner
+              Government (NNCHS-SSLG) is the highest governing and representative body of all
+              students in the school, serving as the unified voice of the learner community. It
+              leads initiatives and programs that uphold student welfare, promote academic
+              excellence, and foster holistic youth development in alignment with the ideals of the
+              Department of Education.
             </p>
 
             <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed bg-blue-50/65 dark:bg-slate-800/65 border border-blue-100 dark:border-slate-700 rounded-xl p-4">
@@ -312,7 +312,8 @@ export function LandingSection({
               successfully renewed its YORP registration, continuing its steadfast mission to
               champion key advocacies in{' '}
               <strong className="text-blue-900 dark:text-yellow-300">
-                {YORP_ADVOCACIES.join(', ')}
+                HEALTH, EDUCATION, ECONOMIC EMPOWERMENT, SOCIAL INCLUSION, PEACE BUILDING AND
+                SECURITY, GOVERNANCE, ACTIVE LEADERSHIP, GLOBAL MOBILITY, and AGRICULTURE
               </strong>
               .
             </p>

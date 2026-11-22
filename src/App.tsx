@@ -1,14 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
+  Activity,
   Award,
   BookOpenCheck,
   Building2,
   Calendar,
   Camera,
   CheckCircle2,
+  ChevronDown,
   Cloud,
   FilePlus2,
+  FileSpreadsheet,
   FileStack,
   FileText,
   Globe,
@@ -82,6 +85,10 @@ import { ReportingDeskSection } from './components/portal/ReportingDeskSection.t
 import { ResolutionsFundsSection } from './components/portal/ResolutionsFundsSection.tsx';
 import { ServicesPrintingSection } from './components/portal/ServicesPrintingSection.tsx';
 import {
+  WELCOME_SEEN_SESSION_KEY,
+  WelcomeOverlay,
+} from './components/portal/WelcomeOverlay.tsx';
+import {
   getCachedIdToken,
   getDocumentFileUrl,
   getFreshIdToken,
@@ -97,7 +104,9 @@ import {
 import { downloadDriveFileBlob } from './lib/googleDrive.ts';
 import {
   fetchFromCloud,
+  getActiveSyncEndpointInfo,
   loadPortalState,
+  pingCloudEndpoint,
   publishToCloud,
   savePortalState,
   submitPublicItemToCloud,
@@ -174,6 +183,27 @@ export default function App() {
   const [activePortalSection, setActivePortalSection] = useState<PortalSectionId>('home');
   const [dirSubTab, setDirSubTab] = useState<DirectorySubTab>('officers');
 
+  // Celebratory Welcome Overlay (first-visit sessionStorage + re-openable)
+  const [welcomeOpen, setWelcomeOpen] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem(WELCOME_SEEN_SESSION_KEY) !== '1';
+    } catch {
+      return true;
+    }
+  });
+
+  // Expandable Admin Header Connection Health Popover
+  const [healthOpen, setHealthOpen] = useState(false);
+  const [pingingCloud, setPingingCloud] = useState(false);
+  const [pingResult, setPingResult] = useState<{
+    ok: boolean;
+    endpoint: string;
+    latencyMs: number;
+    error?: string;
+    checkedAt: string;
+  } | null>(null);
+  const healthDropdownRef = useRef<HTMLDivElement | null>(null);
+
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -245,8 +275,38 @@ export default function App() {
     applyThemeToDocument(theme);
   }, [theme]);
 
+  useEffect(() => {
+    if (!healthOpen) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (
+        healthDropdownRef.current &&
+        !healthDropdownRef.current.contains(e.target as Node)
+      ) {
+        setHealthOpen(false);
+      }
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setHealthOpen(false);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    window.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      window.removeEventListener('keydown', handleEsc);
+    };
+  }, [healthOpen]);
+
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
+  const handleCloseWelcome = () => {
+    try {
+      sessionStorage.setItem(WELCOME_SEEN_SESSION_KEY, '1');
+    } catch {
+      // ignore sessionStorage unavailable
+    }
+    setWelcomeOpen(false);
   };
 
   const resolveActiveAuthToken = async (): Promise<string | null> => {
@@ -320,6 +380,37 @@ export default function App() {
     savePortalState(imported);
     await pushStateToCloud(imported, false);
     notify('JSON Snapshot imported and synced cleanly.');
+  };
+
+  const handleCommitAndSync = async (nextState: PortalState, successMessage: string) => {
+    setPortalState(nextState);
+    portalStateRef.current = nextState;
+    savePortalState(nextState);
+    await pushStateToCloud(nextState, false);
+    notify(successMessage);
+  };
+
+  const handlePingCloud = async () => {
+    setPingingCloud(true);
+    try {
+      const result = await pingCloudEndpoint();
+      setPingResult({
+        ok: result.ok,
+        endpoint: result.endpoint,
+        latencyMs: result.latencyMs,
+        error: result.error,
+        checkedAt: new Date().toLocaleTimeString(),
+      });
+      if (result.ok) {
+        setSyncMode(result.mode);
+        setLastSyncedAt(new Date().toISOString());
+        notify(`Cloud ping succeeded (${result.latencyMs} ms).`);
+      } else {
+        notify(result.error || 'Cloud ping failed.');
+      }
+    } finally {
+      setPingingCloud(false);
+    }
   };
 
   useEffect(() => {
@@ -644,6 +735,7 @@ export default function App() {
     { id: 'portal-programs-lf', label: 'Programs & Lost/Found', icon: Sparkles },
     { id: 'portal-directory', label: 'Directories & Services Info', icon: Users },
     { id: 'portal-res-cal-funds', label: 'Resolutions, Calendar & Funds', icon: Calendar },
+    { id: 'portal-import-export', label: 'Import / Export (CSV)', icon: FileSpreadsheet },
   ];
 
   const recordsNavItems: Array<{
@@ -881,22 +973,100 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-2.5 shrink-0">
-                <span
-                  className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border ${
-                    syncMode === 'cloud' || syncMode === 'server'
-                      ? 'bg-[#facc15]/20 text-blue-950 dark:text-[#fde047] border-[#eab308]/60'
-                      : 'bg-blue-50 dark:bg-slate-800 text-blue-900 dark:text-slate-300 border-blue-200 dark:border-slate-700'
-                  }`}
-                >
-                  <Cloud className="w-3.5 h-3.5" />
-                  <span>
-                    {syncMode === 'cloud'
-                      ? 'Cloud Sync Connected'
-                      : syncMode === 'server'
-                      ? 'Shared Server Sync'
-                      : 'Local Preview'}
-                  </span>
-                </span>
+                <div className="relative" ref={healthDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setHealthOpen((v) => !v)}
+                    aria-expanded={healthOpen}
+                    aria-label="Inspect connection health"
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors whitespace-nowrap ${
+                      syncMode === 'cloud' || syncMode === 'server'
+                        ? 'bg-[#facc15]/25 text-blue-950 dark:text-[#fde047] border-[#eab308]/80 hover:bg-[#facc15]/35'
+                        : 'bg-blue-50 dark:bg-slate-800 text-blue-900 dark:text-slate-200 border-blue-200 dark:border-slate-700 hover:bg-blue-100 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <Activity className="w-3.5 h-3.5 shrink-0" />
+                    <span className="hidden sm:inline">Connection Health</span>
+                    <span className="sm:hidden">Health</span>
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 transition-transform ${
+                        healthOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {healthOpen && (
+                    <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 shadow-2xl p-4 space-y-3 z-50 text-xs">
+                      <div className="flex items-center justify-between gap-2 pb-2 border-b border-blue-100 dark:border-slate-800">
+                        <span className="font-extrabold text-blue-950 dark:text-white flex items-center gap-1.5">
+                          <Cloud className="w-4 h-4 text-blue-700 dark:text-[#fde047]" />
+                          <span>Connection Health</span>
+                        </span>
+                        <span className="font-extrabold text-blue-800 dark:text-[#fde047]">
+                          {syncMode === 'cloud'
+                            ? 'Live Cloud Sync'
+                            : syncMode === 'server'
+                            ? 'Shared Server Sync'
+                            : 'Local Preview'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-2 text-[11px]">
+                        <div>
+                          <p className="font-bold text-slate-500 dark:text-slate-400">
+                            Last Successful Sync
+                          </p>
+                          <p className="font-mono-code font-semibold text-blue-950 dark:text-slate-100 tabular-nums">
+                            {lastSyncedAt
+                              ? new Date(lastSyncedAt).toLocaleString()
+                              : 'Not synced in this session'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-500 dark:text-slate-400">
+                            Current Active Endpoint
+                          </p>
+                          <p className="font-mono-code text-blue-900 dark:text-yellow-200 break-all bg-blue-50/70 dark:bg-slate-950 px-2.5 py-1.5 rounded-lg border border-blue-100 dark:border-slate-800 mt-0.5">
+                            {getActiveSyncEndpointInfo().endpoint}
+                          </p>
+                        </div>
+                      </div>
+
+                      {pingResult && (
+                        <div
+                          className={`p-2.5 rounded-lg border text-[11px] font-semibold ${
+                            pingResult.ok
+                              ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-300 dark:border-blue-700 text-blue-950 dark:text-[#fde047]'
+                              : 'bg-yellow-50 dark:bg-yellow-950/50 border-[#eab308] text-slate-950 dark:text-yellow-200'
+                          }`}
+                        >
+                          {pingResult.ok
+                            ? `Cloud Reachable · ${pingResult.latencyMs} ms (checked ${pingResult.checkedAt})`
+                            : `Ping Failed (${pingResult.latencyMs} ms): ${pingResult.error || 'Unreachable'}`}
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={pingingCloud}
+                          onClick={() => void handlePingCloud()}
+                          className="px-3.5 py-2 rounded-lg bg-[#1e3a8a] hover:bg-[#1d4ed8] text-white text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                        >
+                          <Activity className="w-3.5 h-3.5 text-[#fde047]" />
+                          <span>{pingingCloud ? 'Pinging...' : 'Ping Cloud'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHealthOpen(false)}
+                          className="px-3 py-2 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   disabled={syncing}
@@ -937,6 +1107,7 @@ export default function App() {
                   onPublishNow={handlePublishNow}
                   onPullCloudNow={() => handlePullCloudNow(false)}
                   onImportSnapshot={handleImportSnapshot}
+                  onCommitAndSync={handleCommitAndSync}
                   authToken={cmsSession?.token || getCachedIdToken() || null}
                   currentAdminUsername={cmsSession?.username || currentUser?.username || 'admin'}
                   onCredentialsUpdated={(newUsername, newToken) =>
@@ -1195,6 +1366,7 @@ export default function App() {
         onToggleTheme={toggleTheme}
         onNavigate={navigatePortal}
         onOpenHub={handleOpenHub}
+        onOpenWelcome={() => setWelcomeOpen(true)}
         isAuthenticated={hasHubAccess && !initializing}
       />
 
@@ -1344,6 +1516,13 @@ export default function App() {
               </button>
               <button
                 type="button"
+                onClick={() => setWelcomeOpen(true)}
+                className="hover:text-[#fde047] cursor-pointer"
+              >
+                Welcome Banner
+              </button>
+              <button
+                type="button"
                 onClick={handleOpenHub}
                 className="text-[#fde047] font-extrabold hover:text-yellow-200 cursor-pointer pt-1"
               >
@@ -1352,10 +1531,26 @@ export default function App() {
             </div>
           </div>
         </div>
-        <div className="border-t border-slate-800/90 py-4 px-4 text-center text-[11px] text-slate-400">
-          NNCHS Supreme Secondary Learner Government · SY {portalState.schoolYear}
+        <div className="border-t border-slate-800/90 py-5 px-4 max-w-7xl mx-auto space-y-2 text-center text-[11px] text-slate-400">
+          <p className="text-slate-300 leading-relaxed max-w-4xl mx-auto">
+            Data Privacy &amp; Child Protection Notice: All information submitted through this
+            portal is strictly confidential and protected under the Data Privacy Act of 2012 (RA
+            10173), the Anti-Bullying Act of 2013 (RA 10627), and the DepEd Child Protection Policy
+            (DepEd Order No. 40, s. 2012). Access to this report is restricted solely to authorized
+            school welfare personnel.
+          </p>
+          <p className="text-slate-400 font-semibold">
+            NNCHS Supreme Secondary Learner Government · SY {portalState.schoolYear}
+          </p>
         </div>
       </footer>
+
+      {/* Celebratory First-Visit & Re-openable Welcome Pop-Up Overlay */}
+      <WelcomeOverlay
+        isOpen={welcomeOpen}
+        schoolYear={portalState.schoolYear}
+        onClose={handleCloseWelcome}
+      />
 
       {/* Always-White Formal Official Letterhead Modal */}
       {letterheadDoc && (

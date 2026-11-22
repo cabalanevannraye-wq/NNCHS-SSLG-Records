@@ -1,7 +1,10 @@
 import { buildApiUrl } from './api.ts';
 
-export const PORTAL_STORAGE_KEY = 'nnchs_sslg_shared_state_v1';
-export const LEGACY_PORTAL_STORAGE_KEY = 'nnchs_sslg_portal_v2';
+export const PORTAL_STORAGE_KEY = 'nnchs_sslg_shared_state_v2';
+export const LEGACY_PORTAL_STORAGE_KEYS = [
+  'nnchs_sslg_shared_state_v1',
+  'nnchs_sslg_portal_v2',
+] as const;
 export const SYNC_CONFIG_KEY = 'nnchs_sslg_sync_config_v1';
 export const THEME_STORAGE_KEY = 'nnchs_sslg_theme';
 export const DEFAULT_YORP_LOGO_PATH = '/assets/aistudio/image_582ebce5.png';
@@ -132,10 +135,16 @@ export interface LostFoundItem {
 }
 
 export type TicketCategory =
-  | 'Student Welfare / Anti-Bullying'
+  | 'Bullying / Learner Welfare'
   | 'Campus Facilities'
   | 'Academic / Policy Concern'
   | 'General Suggestion';
+
+export interface TicketEvidenceFile {
+  name: string;
+  mimeType: string;
+  dataUrl: string;
+}
 
 export interface GrievanceTicket {
   id: string;
@@ -146,6 +155,31 @@ export interface GrievanceTicket {
   gradeSection: string;
   subject: string;
   details: string;
+  // Section 1: Reporter Information & Confidentiality
+  reportingRole?: 'Self (Target/Victim)' | 'Witness' | 'Concerned Peer' | 'Parent or Guardian';
+  anonymityPreference?:
+    | 'Full Disclosure (Open for direct follow-up)'
+    | 'Confidential (Known only to the Guidance Counselor/Welfare Officer)'
+    | 'Strictly Anonymous (No contact details provided)';
+  preferredContactMethod?: 'Email' | 'Messenger' | 'In-Person via Guidance Office';
+  contactValue?: string;
+  // Section 2: Incident Classification
+  bullyingTypes?: string[];
+  incidentFrequency?: 'First time' | 'Happened 2–3 times' | 'Ongoing (Weekly or Daily)';
+  // Section 3: Incident Details & Documentation
+  incidentDateTime?: string;
+  incidentLocation?: string;
+  personsInvolved?: string;
+  witnesses?: string;
+  narrativeDescription?: string;
+  evidenceFiles?: TicketEvidenceFile[];
+  evidenceLink?: string;
+  // Section 4: Immediate Safety & Support Needs
+  immediateSafetyCheck?: 'Yes, immediate intervention is needed' | 'No, I am currently safe' | 'Unsure';
+  previouslyReported?: boolean;
+  previousReportDetails?: string;
+  supportPreferences?: string[];
+  // Legacy compatibility fields
   welfareWhatHappened?: string;
   welfareWhoDidIt?: string;
   welfareNextAction?: string;
@@ -797,6 +831,20 @@ export function normalizePrintStatus(raw: string | undefined): PrintJobStatus {
   return map[raw] || 'Submitted';
 }
 
+export function normalizeTicketCategory(raw: string | undefined): TicketCategory {
+  if (raw === 'Student Welfare / Anti-Bullying' || raw === 'Bullying / Learner Welfare') {
+    return 'Bullying / Learner Welfare';
+  }
+  if (
+    raw === 'Campus Facilities' ||
+    raw === 'Academic / Policy Concern' ||
+    raw === 'General Suggestion'
+  ) {
+    return raw;
+  }
+  return 'Bullying / Learner Welfare';
+}
+
 export function normalizePortalState(parsed: Partial<PortalState> | null | undefined): PortalState {
   if (!parsed || typeof parsed !== 'object') {
     return DEFAULT_PORTAL_STATE;
@@ -808,6 +856,14 @@ export function normalizePortalState(parsed: Partial<PortalState> | null | undef
       }))
     : DEFAULT_PORTAL_STATE.printJobs;
 
+  const normalizedTickets = Array.isArray(parsed.tickets)
+    ? parsed.tickets.map((t) => ({
+        ...t,
+        category: normalizeTicketCategory(t?.category),
+        facilityPhotos: Array.isArray(t?.facilityPhotos) ? t.facilityPhotos : [],
+      }))
+    : DEFAULT_PORTAL_STATE.tickets;
+
   return {
     ...DEFAULT_PORTAL_STATE,
     ...parsed,
@@ -816,6 +872,7 @@ export function normalizePortalState(parsed: Partial<PortalState> | null | undef
         ? parsed.aboutPhotos
         : DEFAULT_PORTAL_STATE.aboutPhotos,
     printJobs: normalizedJobs,
+    tickets: normalizedTickets,
     learnerServicesContact: {
       ...DEFAULT_PORTAL_STATE.learnerServicesContact,
       ...(parsed.learnerServicesContact || {}),
@@ -849,7 +906,13 @@ export function loadPortalState(): PortalState {
   try {
     let raw = localStorage.getItem(PORTAL_STORAGE_KEY);
     if (!raw) {
-      raw = localStorage.getItem(LEGACY_PORTAL_STORAGE_KEY);
+      for (const legacyKey of LEGACY_PORTAL_STORAGE_KEYS) {
+        const legacyRaw = localStorage.getItem(legacyKey);
+        if (legacyRaw) {
+          raw = legacyRaw;
+          break;
+        }
+      }
     }
     if (!raw) {
       localStorage.setItem(PORTAL_STORAGE_KEY, JSON.stringify(DEFAULT_PORTAL_STATE));
@@ -1111,6 +1174,65 @@ export function generateTicketCode(existing: GrievanceTicket[]): string {
     return `NNCHS-SSLG-2026-${num + 1}`;
   }
   return candidate;
+}
+
+export function getActiveSyncEndpointInfo(): {
+  endpoint: string;
+  isExternalCloud: boolean;
+} {
+  const custom = loadSyncConfig().syncApiUrl.trim();
+  if (custom) {
+    return { endpoint: custom, isExternalCloud: true };
+  }
+  return {
+    endpoint: buildApiUrl('/api/portal/state'),
+    isExternalCloud: false,
+  };
+}
+
+export async function pingCloudEndpoint(): Promise<{
+  ok: boolean;
+  endpoint: string;
+  latencyMs: number;
+  mode: SyncConnectionMode;
+  statusCode?: number;
+  error?: string;
+}> {
+  const { endpoint, isExternalCloud } = getActiveSyncEndpointInfo();
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const targetPingUrl = isExternalCloud ? endpoint : buildApiUrl('/api/health');
+
+  try {
+    const res = await fetch(targetPingUrl, { method: 'GET' });
+    const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const latencyMs = Math.max(1, Math.round(endedAt - startedAt));
+    if (res.ok) {
+      return {
+        ok: true,
+        endpoint,
+        latencyMs,
+        mode: isExternalCloud ? 'cloud' : 'server',
+        statusCode: res.status,
+      };
+    }
+    return {
+      ok: false,
+      endpoint,
+      latencyMs,
+      mode: 'local',
+      statusCode: res.status,
+      error: `Endpoint returned HTTP ${res.status}`,
+    };
+  } catch (err) {
+    const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    return {
+      ok: false,
+      endpoint,
+      latencyMs: Math.max(1, Math.round(endedAt - startedAt)),
+      mode: 'local',
+      error: err instanceof Error ? err.message : 'Unable to reach sync endpoint.',
+    };
+  }
 }
 
 export function readFileAsDataUrl(file: File): Promise<string> {

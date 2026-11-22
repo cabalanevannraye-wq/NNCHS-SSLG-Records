@@ -61,6 +61,7 @@ import {
   type SyncConnectionMode,
 } from '../../lib/portalStore.ts';
 import { UserAvatar } from '../SSLGCrest.tsx';
+import { PortalCsvImportExportTab } from './PortalCsvImportExportTab.tsx';
 import { StatusTrackerTimeline } from './ServicesPrintingSection.tsx';
 
 export type PortalAdminTabId =
@@ -69,7 +70,8 @@ export type PortalAdminTabId =
   | 'portal-bulletin'
   | 'portal-programs-lf'
   | 'portal-directory'
-  | 'portal-res-cal-funds';
+  | 'portal-res-cal-funds'
+  | 'portal-import-export';
 
 function dataUrlToBlobUrl(dataUrl: string, fallbackMime = 'application/octet-stream'): string | null {
   try {
@@ -99,6 +101,7 @@ export function PortalAdminTabs({
   onPublishNow,
   onPullCloudNow,
   onImportSnapshot,
+  onCommitAndSync,
   authToken = null,
   currentAdminUsername = 'admin',
   onCredentialsUpdated,
@@ -113,6 +116,7 @@ export function PortalAdminTabs({
   onPublishNow?: () => Promise<void>;
   onPullCloudNow?: () => Promise<void>;
   onImportSnapshot?: (state: PortalState) => Promise<void>;
+  onCommitAndSync?: (nextState: PortalState, successMessage: string) => Promise<void>;
   authToken?: string | null;
   currentAdminUsername?: string;
   onCredentialsUpdated?: (newUsername: string, newToken: string) => void;
@@ -246,6 +250,27 @@ export function PortalAdminTabs({
     }
     window.print();
   };
+
+  // =========================================================
+  // TAB 7: IMPORT / EXPORT (CSV BULK DATA & COLUMN MAPPER)
+  // =========================================================
+  if (activeTab === 'portal-import-export') {
+    const commitHandler =
+      onCommitAndSync ||
+      (async (nextState: PortalState, msg: string) => {
+        onUpdatePortal(() => nextState);
+        onNotify(msg);
+      });
+
+    return (
+      <PortalCsvImportExportTab
+        portal={portal}
+        syncing={syncing}
+        onCommitAndSync={commitHandler}
+        onNotify={onNotify}
+      />
+    );
+  }
 
   // =========================================================
   // TAB 1: PRINTABLES & READY-TO-PRINT QUEUE
@@ -695,24 +720,145 @@ export function PortalAdminTabs({
                 </div>
               </div>
 
-              <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
+              {t.immediateSafetyCheck === 'Yes, immediate intervention is needed' && (
+                <div className="p-3 rounded-xl bg-[#facc15] text-slate-950 border border-[#1e3a8a] text-xs font-extrabold flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 shrink-0" />
+                  <span>
+                    URGENT SAFETY INTERVENTION REQUESTED — Coordinate immediately with Guidance Office &amp; Grade Level Learner Formation Officer.
+                  </span>
+                </div>
+              )}
+
+              <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-line">
                 {t.details}
               </p>
 
-              {(t.welfareWhatHappened || t.welfareWhoDidIt || t.welfareNextAction) && (
-                <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 space-y-1.5 text-xs">
+              {(t.reportingRole ||
+                t.bullyingTypes?.length ||
+                t.narrativeDescription ||
+                t.immediateSafetyCheck ||
+                t.welfareWhatHappened ||
+                t.welfareWhoDidIt ||
+                t.welfareNextAction) && (
+                <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 space-y-2 text-xs">
                   <p className="font-extrabold text-blue-950 dark:text-[#fde047]">
-                    Confidential Student Welfare / Anti-Bullying Details
+                    Confidential Learner Welfare / Anti-Bullying Intake Record
                   </p>
-                  <p className="text-slate-700 dark:text-slate-200">
-                    <strong>What happened:</strong> {t.welfareWhatHappened}
-                  </p>
-                  <p className="text-slate-700 dark:text-slate-200">
-                    <strong>Who did it:</strong> {t.welfareWhoDidIt}
-                  </p>
-                  <p className="text-slate-700 dark:text-slate-200">
-                    <strong>What should be done / Help needed:</strong> {t.welfareNextAction}
-                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-slate-700 dark:text-slate-200">
+                    {t.reportingRole && (
+                      <p>
+                        <strong>Reporting Role:</strong> {t.reportingRole}
+                      </p>
+                    )}
+                    {t.anonymityPreference && (
+                      <p>
+                        <strong>Confidentiality:</strong> {t.anonymityPreference}
+                      </p>
+                    )}
+                    {t.preferredContactMethod && !t.isAnonymous && (
+                      <p>
+                        <strong>Contact Preference:</strong> {t.preferredContactMethod}
+                        {t.contactValue ? ` (${t.contactValue})` : ''}
+                      </p>
+                    )}
+                    {t.bullyingTypes && t.bullyingTypes.length > 0 && (
+                      <p>
+                        <strong>Classification:</strong> {t.bullyingTypes.join(', ')}
+                      </p>
+                    )}
+                    {t.incidentFrequency && (
+                      <p>
+                        <strong>Frequency:</strong> {t.incidentFrequency}
+                      </p>
+                    )}
+                    {(t.incidentDateTime || t.incidentLocation) && (
+                      <p>
+                        <strong>When &amp; Where:</strong> {t.incidentDateTime || 'N/A'} ·{' '}
+                        {t.incidentLocation || 'N/A'}
+                      </p>
+                    )}
+                    {t.personsInvolved && (
+                      <p>
+                        <strong>Persons Involved:</strong> {t.personsInvolved}
+                      </p>
+                    )}
+                    {t.witnesses && (
+                      <p>
+                        <strong>Witnesses:</strong> {t.witnesses}
+                      </p>
+                    )}
+                    {t.immediateSafetyCheck && (
+                      <p>
+                        <strong>Safety Check:</strong> {t.immediateSafetyCheck}
+                      </p>
+                    )}
+                    {typeof t.previouslyReported === 'boolean' && (
+                      <p>
+                        <strong>Previously Reported:</strong>{' '}
+                        {t.previouslyReported
+                          ? `Yes${t.previousReportDetails ? ` (${t.previousReportDetails})` : ''}`
+                          : 'No'}
+                      </p>
+                    )}
+                  </div>
+
+                  {t.narrativeDescription && (
+                    <p className="text-slate-700 dark:text-slate-200 whitespace-pre-line">
+                      <strong>Narrative:</strong> {t.narrativeDescription}
+                    </p>
+                  )}
+
+                  {t.supportPreferences && t.supportPreferences.length > 0 && (
+                    <p className="text-slate-700 dark:text-slate-200">
+                      <strong>Requested Support:</strong> {t.supportPreferences.join(' · ')}
+                    </p>
+                  )}
+
+                  {t.evidenceLink && (
+                    <p className="text-slate-700 dark:text-slate-200">
+                      <strong>Evidence Link:</strong>{' '}
+                      <a
+                        href={t.evidenceLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-700 dark:text-[#fde047] underline font-bold break-all"
+                      >
+                        {t.evidenceLink}
+                      </a>
+                    </p>
+                  )}
+
+                  {t.evidenceFiles && t.evidenceFiles.length > 0 && (
+                    <div className="pt-1 flex flex-wrap gap-2">
+                      {t.evidenceFiles.map((file, idx) => (
+                        <a
+                          key={`${file.name}-${idx}`}
+                          href={file.dataUrl}
+                          download={file.name}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 font-bold text-blue-900 dark:text-[#fde047] hover:underline"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>{file.name}</span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+
+                  {t.welfareWhatHappened && (
+                    <p className="text-slate-700 dark:text-slate-200">
+                      <strong>What happened:</strong> {t.welfareWhatHappened}
+                    </p>
+                  )}
+                  {t.welfareWhoDidIt && (
+                    <p className="text-slate-700 dark:text-slate-200">
+                      <strong>Who did it:</strong> {t.welfareWhoDidIt}
+                    </p>
+                  )}
+                  {t.welfareNextAction && (
+                    <p className="text-slate-700 dark:text-slate-200">
+                      <strong>Help needed:</strong> {t.welfareNextAction}
+                    </p>
+                  )}
                 </div>
               )}
 
