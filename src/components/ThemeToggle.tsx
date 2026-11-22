@@ -14,7 +14,7 @@ export function getInitialTheme(): ThemeMode {
       return 'dark';
     }
   } catch {
-    // ignore storage restriction
+    // ignore storage access issues
   }
   return 'light';
 }
@@ -30,7 +30,7 @@ export function applyThemeToDocument(theme: ThemeMode): void {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
   } catch {
-    // ignore storage error
+    // ignore storage access issues
   }
 }
 
@@ -50,21 +50,18 @@ export function ThemeToggle({
       onClick={onToggle}
       aria-label={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
       title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+      className={`group inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 hover:bg-blue-50 dark:hover:bg-slate-700 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
         compact ? 'px-2.5 py-2 text-xs font-semibold' : 'px-3 py-2 text-xs font-semibold'
       }`}
     >
-      {isDark ? (
-        <>
-          <Sun className="w-4 h-4 text-amber-400 shrink-0" />
-          {!compact && <span>Light</span>}
-        </>
-      ) : (
-        <>
-          <Moon className="w-4 h-4 text-slate-700 shrink-0" />
-          {!compact && <span>Dark</span>}
-        </>
-      )}
+      <span className="transition-transform duration-200 group-hover:rotate-12">
+        {isDark ? (
+          <Sun className="w-4 h-4 text-yellow-400 shrink-0" />
+        ) : (
+          <Moon className="w-4 h-4 text-blue-800 shrink-0" />
+        )}
+      </span>
+      {!compact && <span>{isDark ? 'Light' : 'Dark'}</span>}
     </button>
   );
 }

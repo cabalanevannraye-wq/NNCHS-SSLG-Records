@@ -36,18 +36,34 @@
 .animate-sslg-ticker {
   display: inline-flex;
   width: max-content;
-  animation: sslg-ticker 42s linear infinite;
+  animation: sslg-ticker 44s linear infinite;
 }
 
 .animate-sslg-ticker:hover {
   animation-play-state: paused;
 }
 
+@keyframes sslg-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-sslg-fade {
+  animation: sslg-fade 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
   }
-  .animate-sslg-ticker {
+  .animate-sslg-ticker,
+  .animate-sslg-fade {
     animation: none;
   }
 }

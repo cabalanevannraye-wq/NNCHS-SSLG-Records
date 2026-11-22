@@ -4,6 +4,7 @@ import {
   Award,
   BookOpenCheck,
   Building2,
+  Calendar,
   Camera,
   CheckCircle2,
   FilePlus2,
@@ -16,10 +17,11 @@ import {
   LogOut,
   Megaphone,
   Menu,
+  MessageCircle,
   Printer,
   ShieldAlert,
+  Sparkles,
   Users,
-  Wallet,
   X,
 } from 'lucide-react';
 import {
@@ -45,7 +47,7 @@ import { EartagModal, EartagPrintableSheet } from './components/EartagModal.tsx'
 import { ESignModal } from './components/ESignModal.tsx';
 import { FilePreviewModal } from './components/FilePreviewModal.tsx';
 import { GoogleDriveView } from './components/GoogleDriveView.tsx';
-import { LoginView } from './components/LoginView.tsx';
+import { LoginView, type CmsAdminSession } from './components/LoginView.tsx';
 import { PassDocumentModal } from './components/PassDocumentModal.tsx';
 import {
   SSLGCrest,
@@ -63,7 +65,6 @@ import {
   TransmittalPrintableSheet,
   TransmittalSlipModal,
 } from './components/TransmittalSlipModal.tsx';
-import { CalendarAndVerifierSection } from './components/portal/CalendarAndVerifierSection.tsx';
 import {
   DirectoriesSection,
   type DirectorySubTab,
@@ -73,19 +74,11 @@ import {
   PortalAdminTabs,
   type PortalAdminTabId,
 } from './components/portal/PortalAdminTabs.tsx';
+import { ProgramsCalendarSection } from './components/portal/ProgramsCalendarSection.tsx';
 import { PublicNavbar, type PortalJumpTarget } from './components/portal/PublicNavbar.tsx';
-import {
-  ReportingDeskSection,
-  type ReportingSubTab,
-} from './components/portal/ReportingDeskSection.tsx';
-import {
-  ServicesPrintingSection,
-  type ServicesSubTab,
-} from './components/portal/ServicesPrintingSection.tsx';
-import {
-  TransparencySealSection,
-  type TransparencySubTab,
-} from './components/portal/TransparencySealSection.tsx';
+import { ReportingDeskSection } from './components/portal/ReportingDeskSection.tsx';
+import { ResolutionsFundsSection } from './components/portal/ResolutionsFundsSection.tsx';
+import { ServicesPrintingSection } from './components/portal/ServicesPrintingSection.tsx';
 import { getDocumentFileUrl, getHardcopyFileUrl } from './lib/api.ts';
 import {
   buildLeaderboardAndDirectory,
@@ -96,17 +89,13 @@ import {
 } from './lib/firebaseService.ts';
 import { downloadDriveFileBlob } from './lib/googleDrive.ts';
 import {
-  SSLG_ADMIN_SMS_NUMBER,
   loadPortalState,
-  loadSmsLogs,
   savePortalState,
-  saveSmsLogs,
   type GrievanceTicket,
   type LostFoundItem,
   type PortalSectionId,
   type PortalState,
   type PrintRequestJob,
-  type SmsDispatchLog,
 } from './lib/portalStore.ts';
 import type {
   DocumentModuleType,
@@ -149,29 +138,23 @@ type PrintPayload =
 const PORTAL_SECTION_DOM_ID: Record<PortalSectionId, string> = {
   home: 'portal-sec-home',
   directories: 'portal-sec-directories',
-  services: 'portal-sec-services',
-  news: 'portal-sec-home',
+  printing: 'portal-sec-printing',
   reporting: 'portal-sec-reporting',
-  calendar: 'portal-sec-calendar',
-  transparency: 'portal-sec-transparency',
+  'programs-calendar': 'portal-sec-programs-calendar',
+  'resolutions-funds': 'portal-sec-resolutions-funds',
 };
 
 export default function App() {
   // Global Theme State
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
 
-  // Public Portal Shared State (zero-login persistence synced with Admin Hub)
+  // Public Portal Shared State (dynamic CMS persistence synced with Admin Hub)
   const [portalState, setPortalState] = useState<PortalState>(() => loadPortalState());
-  const [smsLogs, setSmsLogs] = useState<SmsDispatchLog[]>(() => loadSmsLogs());
 
   // Navigation & Sub-tab Control
   const [screenMode, setScreenMode] = useState<AppScreenMode>('portal');
   const [activePortalSection, setActivePortalSection] = useState<PortalSectionId>('home');
   const [dirSubTab, setDirSubTab] = useState<DirectorySubTab>('officers');
-  const [srvSubTab, setSrvSubTab] = useState<ServicesSubTab>('printing');
-  const [repSubTab, setRepSubTab] = useState<ReportingSubTab>('submit');
-  const [transSubTab, setTransSubTab] = useState<TransparencySubTab>('legislation');
-  const [highlightVerifier, setHighlightVerifier] = useState(false);
 
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -179,6 +162,9 @@ export default function App() {
 
   // Official White Letterhead Modal
   const [letterheadDoc, setLetterheadDoc] = useState<LetterheadDocumentPayload | null>(null);
+
+  // In-memory CMS Admin session (never stored in localStorage/sessionStorage)
+  const [cmsSession, setCmsSession] = useState<CmsAdminSession | null>(null);
 
   // Firebase Auth & Existing Digital Records Hub State
   const [initializing, setInitializing] = useState(true);
@@ -249,14 +235,6 @@ export default function App() {
     setPortalState((prev) => {
       const next = updater(prev);
       savePortalState(next);
-      return next;
-    });
-  };
-
-  const appendSmsLog = (log: SmsDispatchLog) => {
-    setSmsLogs((prev) => {
-      const next = [log, ...prev];
-      saveSmsLogs(next);
       return next;
     });
   };
@@ -343,23 +321,15 @@ export default function App() {
     [directoryProfiles, contributorStats]
   );
 
+  const hasHubAccess = Boolean(currentUser || cmsSession);
+
   // Portal Navigation Helper
   const navigatePortal = (target: PortalJumpTarget) => {
     setScreenMode('portal');
     setActivePortalSection(target.section);
-    setHighlightVerifier(target.section === 'calendar' && target.subTab === 'verifier');
 
     if (target.section === 'directories' && target.subTab) {
       setDirSubTab(target.subTab as DirectorySubTab);
-    }
-    if (target.section === 'services' && target.subTab) {
-      setSrvSubTab(target.subTab as ServicesSubTab);
-    }
-    if (target.section === 'reporting' && target.subTab) {
-      setRepSubTab(target.subTab as ReportingSubTab);
-    }
-    if (target.section === 'transparency' && target.subTab) {
-      setTransSubTab(target.subTab as TransparencySubTab);
     }
 
     const domId = PORTAL_SECTION_DOM_ID[target.section];
@@ -372,13 +342,11 @@ export default function App() {
   };
 
   // Public Portal Submission Handlers
-  const handlePublicPrintJob = (job: PrintRequestJob, smsLog: SmsDispatchLog) => {
+  const handlePublicPrintJob = (job: PrintRequestJob) => {
     updatePortal((prev) => ({
       ...prev,
       printJobs: [job, ...prev.printJobs],
     }));
-    appendSmsLog(smsLog);
-    notify(`Print job ${job.jobCode} submitted & SMS alert logged for ${SSLG_ADMIN_SMS_NUMBER}.`);
   };
 
   const handlePublicLostReport = (item: LostFoundItem) => {
@@ -393,12 +361,11 @@ export default function App() {
       ...prev,
       tickets: [ticket, ...prev.tickets],
     }));
-    notify(`Ticket ${ticket.ticketCode} submitted to NNCHS SSLG Welfare Desk.`);
   };
 
   // Hub Handlers
   const handleOpenHub = () => {
-    if (currentUser) {
+    if (hasHubAccess) {
       setScreenMode('hub');
     } else {
       setScreenMode('hub-login');
@@ -407,9 +374,10 @@ export default function App() {
 
   const handleLogout = async () => {
     clearGoogleDriveAccessToken();
+    setCmsSession(null);
     await signOut(auth);
     setScreenMode('portal');
-    notify('SSLG Hub locked and signed out safely.');
+    notify('NNCHS SSLG Admin Portal signed out cleanly.');
   };
 
   const handleUserUpdated = (updatedUser: UserAccount) => {
@@ -540,12 +508,12 @@ export default function App() {
     label: string;
     icon: typeof Printer;
   }> = [
-    { id: 'portal-printing', label: 'Free Printing & SMS Logs', icon: Printer },
-    { id: 'portal-grievances', label: 'Grievance & Report Logs', icon: ShieldAlert },
-    { id: 'portal-legislation', label: 'Resolutions & Minutes', icon: FileText },
-    { id: 'portal-finance', label: 'Financial Ledger', icon: Wallet },
-    { id: 'portal-news', label: 'News & Calendar Publisher', icon: Megaphone },
-    { id: 'portal-directory', label: 'Directory & ID Manager', icon: Users },
+    { id: 'portal-printing', label: 'Printables & Free Printing', icon: Printer },
+    { id: 'portal-grievances', label: 'Grievance Moderation', icon: ShieldAlert },
+    { id: 'portal-bulletin', label: 'Slideshow, Advisory & Stats', icon: Megaphone },
+    { id: 'portal-programs-lf', label: 'Programs & Lost/Found', icon: Sparkles },
+    { id: 'portal-directory', label: 'Directories & Services Info', icon: Users },
+    { id: 'portal-res-cal-funds', label: 'Resolutions, Calendar & Funds', icon: Calendar },
   ];
 
   const recordsNavItems: Array<{
@@ -565,58 +533,69 @@ export default function App() {
     { id: 'accounts', label: 'Accounts & Settings', icon: Users, adminOnly: true },
   ];
 
-  const visibleRecordsNav = recordsNavItems.filter(
-    (item) => !item.adminOnly || currentUser?.role === 'admin'
-  );
+  const visibleRecordsNav = currentUser
+    ? recordsNavItems.filter((item) => !item.adminOnly || currentUser.role === 'admin')
+    : [];
 
   const allHubLabels = [...portalManagementNav, ...visibleRecordsNav];
   const activeHubTitle =
-    allHubLabels.find((i) => i.id === activeHubTab)?.label || 'SSLG Governance Hub';
+    allHubLabels.find((i) => i.id === activeHubTab)?.label || 'NNCHS SSLG Admin Portal';
   const defaultSubmitType: DocumentModuleType =
     activeHubTab === 'accomplishments' ? 'accomplishment' : 'general';
 
   // Render Embedded Login View when requested
-  if (screenMode === 'hub-login' && !currentUser) {
+  if (screenMode === 'hub-login' && !hasHubAccess) {
     return (
       <LoginView
         authBlockState={authBlockState}
         onClearBlockState={() => setAuthBlockState(null)}
+        onCmsAdminSignedIn={(session) => {
+          setCmsSession(session);
+          setActiveHubTab('portal-printing');
+          setScreenMode('hub');
+          notify(`Signed in as Website Admin (${session.username}).`);
+        }}
         onReturnToPortal={() => setScreenMode('portal')}
       />
     );
   }
 
-  // Render Authenticated Hub (6 Public-Portal Governance Tabs + Existing Digital Records Vault)
-  if (screenMode === 'hub' && currentUser) {
+  // Render Authenticated Hub (6 Dynamic Website CMS Tabs + Firebase 5-Stage Records Vault)
+  if (screenMode === 'hub' && hasHubAccess) {
     const isPortalAdminTab = activeHubTab.startsWith('portal-');
+    const displayUserName = currentUser?.fullName || `Admin (${cmsSession?.username || 'SSLG'})`;
+    const displayRoleLabel = currentUser?.positionOrClub || 'Dynamic Website CMS Custodian';
+
     return (
       <>
         <div className="no-print min-h-screen bg-[#f8fafc] dark:bg-[#0b1120] flex flex-col lg:flex-row">
           {mobileNavOpen && (
             <div
-              className="fixed inset-0 z-40 bg-slate-900/50 lg:hidden"
+              className="fixed inset-0 z-40 bg-slate-950/60 lg:hidden"
               onClick={() => setMobileNavOpen(false)}
             />
           )}
 
           <aside
-            className={`fixed inset-y-0 left-0 z-50 w-72 bg-slate-900 text-slate-100 flex flex-col justify-between transition-transform lg:static lg:translate-x-0 shrink-0 ${
+            className={`fixed inset-y-0 left-0 z-50 w-72 bg-[#0f172a] text-slate-100 flex flex-col justify-between transition-transform lg:static lg:translate-x-0 shrink-0 ${
               mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
             }`}
           >
             <div className="flex-1 overflow-y-auto">
-              <div className="px-5 py-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="px-5 py-5 border-b border-blue-900/60 flex items-center justify-between">
                 <div className="flex items-center gap-3 min-w-0">
                   <SSLGCrest className="w-9 h-9 shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-white truncate">NNCHS SSLG Hub</p>
-                    <p className="text-[11px] text-amber-300 truncate">SY {settings.schoolYear}</p>
+                    <p className="text-sm font-extrabold text-white truncate">NNCHS SSLG Admin</p>
+                    <p className="text-[11px] font-bold text-[#fde047] truncate">
+                      SY {portalState.schoolYear}
+                    </p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setMobileNavOpen(false)}
-                  className="lg:hidden p-1.5 text-slate-400 hover:text-white cursor-pointer"
+                  className="lg:hidden p-1.5 text-slate-300 hover:text-white cursor-pointer"
                   aria-label="Close navigation"
                 >
                   <X className="w-5 h-5" />
@@ -625,8 +604,8 @@ export default function App() {
 
               <div className="p-3 space-y-5">
                 <div>
-                  <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-widest text-amber-400">
-                    Public Portal Governance
+                  <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-widest text-[#fde047]">
+                    Dynamic Website CMS
                   </p>
                   <nav className="space-y-1">
                     {portalManagementNav.map((item) => {
@@ -642,11 +621,11 @@ export default function App() {
                           }}
                           className={`w-full flex items-center gap-3 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
                             isActive
-                              ? 'bg-blue-800 text-white'
-                              : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                              ? 'bg-[#1e3a8a] text-white border border-blue-600'
+                              : 'text-slate-300 hover:bg-blue-950/70 hover:text-white'
                           }`}
                         >
-                          <Icon className="w-4 h-4 shrink-0" />
+                          <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#fde047]' : ''}`} />
                           <span className="truncate">{item.label}</span>
                         </button>
                       );
@@ -654,72 +633,78 @@ export default function App() {
                   </nav>
                 </div>
 
-                <div>
-                  <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                    5-Stage Records &amp; Routing
-                  </p>
-                  <nav className="space-y-1">
-                    {visibleRecordsNav.map((item) => {
-                      const Icon = item.icon;
-                      const isActive = activeHubTab === item.id;
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => {
-                            setActiveHubTab(item.id);
-                            setMobileNavOpen(false);
-                          }}
-                          className={`w-full flex items-center gap-3 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                            isActive
-                              ? 'bg-blue-800 text-white'
-                              : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                          }`}
-                        >
-                          <Icon className="w-4 h-4 shrink-0" />
-                          <span className="truncate">{item.label}</span>
-                        </button>
-                      );
-                    })}
-                  </nav>
-                </div>
+                {visibleRecordsNav.length > 0 && (
+                  <div>
+                    <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-widest text-blue-300">
+                      5-Stage Records &amp; Routing
+                    </p>
+                    <nav className="space-y-1">
+                      {visibleRecordsNav.map((item) => {
+                        const Icon = item.icon;
+                        const isActive = activeHubTab === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              setActiveHubTab(item.id);
+                              setMobileNavOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-3 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                              isActive
+                                ? 'bg-[#1e3a8a] text-white border border-blue-600'
+                                : 'text-slate-300 hover:bg-blue-950/70 hover:text-white'
+                            }`}
+                          >
+                            <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#fde047]' : ''}`} />
+                            <span className="truncate">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </nav>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="p-4 border-t border-slate-800 space-y-3">
+            <div className="p-4 border-t border-blue-900/60 space-y-3">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="relative shrink-0">
                   <UserAvatar
-                    fullName={currentUser.fullName}
-                    avatarDataUrl={currentUser.avatarDataUrl}
+                    fullName={displayUserName}
+                    avatarDataUrl={currentUser?.avatarDataUrl}
                     size="sm"
                   />
-                  <button
-                    type="button"
-                    onClick={() => sidebarAvatarInputRef.current?.click()}
-                    title="Update profile picture"
-                    aria-label="Update profile picture"
-                    className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-blue-700 hover:bg-blue-600 text-white border border-slate-900 flex items-center justify-center cursor-pointer"
-                  >
-                    <Camera className="w-2.5 h-2.5" />
-                  </button>
-                  <input
-                    ref={sidebarAvatarInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    onChange={handleSidebarAvatarUpload}
-                    className="hidden"
-                  />
+                  {currentUser && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => sidebarAvatarInputRef.current?.click()}
+                        title="Update profile picture"
+                        aria-label="Update profile picture"
+                        className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#1e3a8a] hover:bg-[#1d4ed8] text-[#fde047] border border-slate-900 flex items-center justify-center cursor-pointer"
+                      >
+                        <Camera className="w-2.5 h-2.5" />
+                      </button>
+                      <input
+                        ref={sidebarAvatarInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        onChange={handleSidebarAvatarUpload}
+                        className="hidden"
+                      />
+                    </>
+                  )}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold text-white truncate">
-                    {currentUser.fullName}
-                  </p>
-                  <p className="text-[11px] text-amber-300 truncate">
-                    {currentUser.positionOrClub}
-                  </p>
+                  <p className="text-xs font-semibold text-white truncate">{displayUserName}</p>
+                  <p className="text-[11px] text-[#fde047] truncate">{displayRoleLabel}</p>
                   <p className="text-[11px] text-slate-400 truncate">
-                    {currentUser.username ? `@${currentUser.username}` : currentUser.email}
+                    {currentUser
+                      ? currentUser.username
+                        ? `@${currentUser.username}`
+                        : currentUser.email
+                      : `@${cmsSession?.username}`}
                   </p>
                 </div>
               </div>
@@ -727,58 +712,60 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setScreenMode('portal')}
-                  className="py-2 px-2.5 text-xs font-semibold text-slate-100 bg-blue-900/70 hover:bg-blue-800 rounded-lg inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="py-2 px-2.5 text-xs font-bold text-slate-950 bg-[#facc15] hover:bg-[#eab308] rounded-lg inline-flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Globe className="w-3.5 h-3.5" />
-                  <span>Public View</span>
+                  <span>Public Site</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="py-2 px-2.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="py-2 px-2.5 text-xs font-semibold text-slate-200 bg-blue-950 hover:bg-blue-900 border border-blue-800 rounded-lg inline-flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Lock Hub</span>
+                  <span>Sign Out</span>
                 </button>
               </div>
             </div>
           </aside>
 
           <div className="flex-1 flex flex-col min-w-0">
-            <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 sm:px-8 py-3.5 flex items-center justify-between gap-4 sticky top-0 z-30">
+            <header className="bg-white dark:bg-slate-900 border-b border-blue-100 dark:border-slate-800 px-4 sm:px-8 py-3.5 flex items-center justify-between gap-4 sticky top-0 z-30">
               <div className="flex items-center gap-3 min-w-0">
                 <button
                   type="button"
                   onClick={() => setMobileNavOpen(true)}
-                  className="lg:hidden p-2 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
+                  className="lg:hidden p-2 text-blue-950 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg cursor-pointer"
                   aria-label="Open menu"
                 >
                   <Menu className="w-5 h-5" />
                 </button>
                 <div className="min-w-0">
-                  <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white truncate">
+                  <h1 className="text-base sm:text-lg font-extrabold text-blue-950 dark:text-white truncate">
                     {activeHubTitle}
                   </h1>
                   <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                    {settings.organizationHeader}
+                    Nabunturan National Comprehensive High School — Supreme Secondary Learner Government
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2.5 shrink-0">
                 <ThemeToggle theme={theme} onToggle={toggleTheme} compact />
-                <button
-                  type="button"
-                  onClick={() => setPassModalDocType(defaultSubmitType)}
-                  className="px-3.5 py-2 text-xs sm:text-sm font-semibold bg-blue-800 hover:bg-blue-900 text-white rounded-lg inline-flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
-                >
-                  <FilePlus2 className="w-4 h-4" />
-                  <span>
-                    {defaultSubmitType === 'accomplishment'
-                      ? 'Submit Accomplishment'
-                      : 'Submit Document'}
-                  </span>
-                </button>
+                {currentUser && (
+                  <button
+                    type="button"
+                    onClick={() => setPassModalDocType(defaultSubmitType)}
+                    className="px-3.5 py-2 text-xs sm:text-sm font-bold bg-[#1e3a8a] hover:bg-[#1d4ed8] text-white rounded-lg inline-flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <FilePlus2 className="w-4 h-4 text-[#fde047]" />
+                    <span>
+                      {defaultSubmitType === 'accomplishment'
+                        ? 'Submit Accomplishment'
+                        : 'Submit Document'}
+                    </span>
+                  </button>
+                )}
               </div>
             </header>
 
@@ -787,14 +774,12 @@ export default function App() {
                 <PortalAdminTabs
                   activeTab={activeHubTab as PortalAdminTabId}
                   portal={portalState}
-                  smsLogs={smsLogs}
                   onUpdatePortal={updatePortal}
-                  onAppendSmsLog={appendSmsLog}
                   onNotify={notify}
                 />
               )}
 
-              {activeHubTab === 'overview' && (
+              {currentUser && activeHubTab === 'overview' && (
                 <DashboardOverview
                   documents={documents}
                   leaderboard={leaderboard}
@@ -811,7 +796,7 @@ export default function App() {
                 />
               )}
 
-              {activeHubTab === 'general' && (
+              {currentUser && activeHubTab === 'general' && (
                 <DocumentTrackerView
                   docType="general"
                   documents={documents}
@@ -831,7 +816,7 @@ export default function App() {
                 />
               )}
 
-              {activeHubTab === 'accomplishments' && (
+              {currentUser && activeHubTab === 'accomplishments' && (
                 <DocumentTrackerView
                   docType="accomplishment"
                   documents={documents}
@@ -851,7 +836,7 @@ export default function App() {
                 />
               )}
 
-              {activeHubTab === 'register' && (
+              {currentUser && activeHubTab === 'register' && (
                 <ControlRegisterView
                   documents={documents}
                   currentUser={currentUser}
@@ -869,7 +854,7 @@ export default function App() {
                 />
               )}
 
-              {activeHubTab === 'directory' && (
+              {currentUser && activeHubTab === 'directory' && (
                 <DirectoryView
                   directory={directory}
                   documents={documents}
@@ -881,7 +866,7 @@ export default function App() {
                 />
               )}
 
-              {activeHubTab === 'compilations' && (
+              {currentUser && activeHubTab === 'compilations' && (
                 <CompilationsView
                   documents={documents}
                   settings={settings}
@@ -905,7 +890,7 @@ export default function App() {
                 />
               )}
 
-              {activeHubTab === 'hardcopy' && (
+              {currentUser && activeHubTab === 'hardcopy' && (
                 <SignedHardcopyArchiveView
                   documents={documents}
                   currentUser={currentUser}
@@ -925,9 +910,9 @@ export default function App() {
                 />
               )}
 
-              {activeHubTab === 'drive' && <GoogleDriveView />}
+              {currentUser && activeHubTab === 'drive' && <GoogleDriveView />}
 
-              {activeHubTab === 'accounts' && currentUser.role === 'admin' && (
+              {currentUser && activeHubTab === 'accounts' && currentUser.role === 'admin' && (
                 <AdminAccountsView
                   currentUser={currentUser}
                   settings={settings}
@@ -937,7 +922,7 @@ export default function App() {
             </main>
           </div>
 
-          {passModalDocType && (
+          {currentUser && passModalDocType && (
             <PassDocumentModal
               docType={passModalDocType}
               currentUser={currentUser}
@@ -948,7 +933,7 @@ export default function App() {
             />
           )}
 
-          {esignDoc && (
+          {currentUser && esignDoc && (
             <ESignModal
               doc={esignDoc}
               currentUser={currentUser}
@@ -1024,9 +1009,9 @@ export default function App() {
         {toastMessage && (
           <div
             role="status"
-            className="no-print fixed bottom-5 right-5 z-50 bg-slate-900 dark:bg-slate-800 text-white px-4 py-3 rounded-xl shadow-xl border border-slate-700 text-xs font-semibold flex items-center gap-2"
+            className="no-print fixed bottom-5 right-5 z-50 bg-[#0f172a] text-white px-4 py-3 rounded-xl shadow-xl border border-[#facc15]/60 text-xs font-semibold flex items-center gap-2"
           >
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <CheckCircle2 className="w-4 h-4 text-[#fde047] shrink-0" />
             <span>{toastMessage}</span>
           </div>
         )}
@@ -1034,7 +1019,7 @@ export default function App() {
     );
   }
 
-  // DEFAULT ZERO-LOGIN OFFICIAL PUBLIC PORTAL (YORP-Inspired Architecture)
+  // PUBLIC NNCHS SSLG WEBSITE (Blue & Compre Yellow, Dynamic CMS Connected)
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-[#0b1120] text-slate-900 dark:text-slate-100 flex flex-col">
       <PublicNavbar
@@ -1044,7 +1029,7 @@ export default function App() {
         onToggleTheme={toggleTheme}
         onNavigate={navigatePortal}
         onOpenHub={handleOpenHub}
-        isAuthenticated={Boolean(currentUser) && !initializing}
+        isAuthenticated={hasHubAccess && !initializing}
       />
 
       <main className="no-print flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 space-y-16">
@@ -1054,64 +1039,58 @@ export default function App() {
 
         <div
           id="portal-sec-directories"
-          className="scroll-mt-28 pt-6 border-t border-slate-200 dark:border-slate-800"
+          className="scroll-mt-28 pt-6 border-t border-blue-100 dark:border-slate-800"
         >
           <DirectoriesSection portal={portalState} initialSubTab={dirSubTab} />
         </div>
 
         <div
-          id="portal-sec-services"
-          className="scroll-mt-28 pt-6 border-t border-slate-200 dark:border-slate-800"
+          id="portal-sec-printing"
+          className="scroll-mt-28 pt-6 border-t border-blue-100 dark:border-slate-800"
         >
           <ServicesPrintingSection
             portal={portalState}
-            initialSubTab={srvSubTab}
             onSubmitPrintJob={handlePublicPrintJob}
-            onSubmitLostReport={handlePublicLostReport}
-            onOpenLetterhead={(doc) => setLetterheadDoc(doc)}
             onNotify={notify}
           />
         </div>
 
         <div
           id="portal-sec-reporting"
-          className="scroll-mt-28 pt-6 border-t border-slate-200 dark:border-slate-800"
+          className="scroll-mt-28 pt-6 border-t border-blue-100 dark:border-slate-800"
         >
           <ReportingDeskSection
             portal={portalState}
-            initialSubTab={repSubTab}
             onSubmitTicket={handlePublicTicket}
-            onOpenLetterhead={(doc) => setLetterheadDoc(doc)}
             onNotify={notify}
           />
         </div>
 
         <div
-          id="portal-sec-calendar"
-          className="scroll-mt-28 pt-6 border-t border-slate-200 dark:border-slate-800"
+          id="portal-sec-programs-calendar"
+          className="scroll-mt-28 pt-6 border-t border-blue-100 dark:border-slate-800"
         >
-          <CalendarAndVerifierSection
+          <ProgramsCalendarSection
             portal={portalState}
-            highlightVerifier={highlightVerifier}
+            onSubmitLostFound={handlePublicLostReport}
             onNotify={notify}
           />
         </div>
 
         <div
-          id="portal-sec-transparency"
-          className="scroll-mt-28 pt-6 border-t border-slate-200 dark:border-slate-800"
+          id="portal-sec-resolutions-funds"
+          className="scroll-mt-28 pt-6 border-t border-blue-100 dark:border-slate-800"
         >
-          <TransparencySealSection
+          <ResolutionsFundsSection
             portal={portalState}
-            initialSubTab={transSubTab}
             onOpenLetterhead={(doc) => setLetterheadDoc(doc)}
             onNotify={notify}
           />
         </div>
       </main>
 
-      {/* Institutional Portal Footer */}
-      <footer className="no-print bg-[#0f172a] dark:bg-slate-950 text-slate-300 border-t border-slate-800 mt-12">
+      {/* Clean NNCHS SSLG Footer (Admin-Editable Learner Services & Contact Info) */}
+      <footer className="no-print bg-[#0f172a] dark:bg-slate-950 text-slate-300 border-t-4 border-[#eab308] mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 grid grid-cols-1 md:grid-cols-12 gap-8 text-xs">
           <div className="md:col-span-5 space-y-3">
             <div className="flex items-center gap-3">
@@ -1120,69 +1099,99 @@ export default function App() {
                 <p className="text-sm font-extrabold text-white">
                   Nabunturan National Comprehensive High School
                 </p>
-                <p className="text-amber-400 font-semibold">
+                <p className="text-[#fde047] font-bold">
                   Supreme Secondary Learner Government (NNCHS SSLG)
                 </p>
               </div>
             </div>
             <p className="text-slate-400 leading-relaxed">
-              Nabunturan, Davao de Oro · Schools Division of Davao de Oro · Nabunturan West
-              District. Operating under DepEd Order No. 18, s. 2023 in service of all Junior and
-              Senior High School learners.
+              Official Website of the NNCHS Supreme Secondary Learner Government · Nabunturan, Davao
+              de Oro · Schools Division of Davao de Oro.
             </p>
+            <a
+              href={portalState.messengerGroupUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#facc15] hover:bg-[#eab308] text-slate-950 font-extrabold transition-colors"
+            >
+              <MessageCircle className="w-3.5 h-3.5" />
+              <span>Join SSLG Updates Messenger Group</span>
+            </a>
           </div>
 
           <div className="md:col-span-4 space-y-2">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
-              Student Services &amp; SMS Hotline
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[#fde047]">
+              Learner Services &amp; Contact Info
             </p>
-            <p>SSLG Office: Room 104, Main Academic Building</p>
+            <p className="text-white font-semibold">
+              {portalState.learnerServicesContact.officeLocation}
+            </p>
+            <p>Hours: {portalState.learnerServicesContact.officeHours}</p>
             <p>
-              Free Printing SMS Alert Custodian:{' '}
-              <strong className="font-mono-code text-white">{SSLG_ADMIN_SMS_NUMBER}</strong>
+              Contact:{' '}
+              <strong className="font-mono-code text-[#fde047]">
+                {portalState.learnerServicesContact.contactNumber}
+              </strong>
             </p>
-            <p>Claim Windows: 9:30–10:00 AM · 12:00–1:00 PM · 4:00–4:45 PM</p>
+            <p>Email: {portalState.learnerServicesContact.email}</p>
+            <p className="text-slate-400 leading-relaxed pt-1">
+              {portalState.learnerServicesContact.serviceNote}
+            </p>
           </div>
 
           <div className="md:col-span-3 space-y-2">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
-              Quick Access
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[#fde047]">
+              Navigation
             </p>
             <div className="flex flex-col items-start gap-1.5">
               <button
                 type="button"
-                onClick={() => navigatePortal({ section: 'services', subTab: 'printing' })}
-                className="hover:text-white cursor-pointer"
+                onClick={() => navigatePortal({ section: 'directories' })}
+                className="hover:text-[#fde047] cursor-pointer"
               >
-                Free Printing Queue
+                Directory
               </button>
               <button
                 type="button"
-                onClick={() => navigatePortal({ section: 'reporting', subTab: 'track' })}
-                className="hover:text-white cursor-pointer"
+                onClick={() => navigatePortal({ section: 'printing' })}
+                className="hover:text-[#fde047] cursor-pointer"
               >
-                Live Ticket Status Checker
+                Free Printing Services
               </button>
               <button
                 type="button"
-                onClick={() => navigatePortal({ section: 'transparency' })}
-                className="hover:text-white cursor-pointer"
+                onClick={() => navigatePortal({ section: 'reporting' })}
+                className="hover:text-[#fde047] cursor-pointer"
               >
-                Transparency Seal &amp; Ledger
+                Reporting System
+              </button>
+              <button
+                type="button"
+                onClick={() => navigatePortal({ section: 'programs-calendar' })}
+                className="hover:text-[#fde047] cursor-pointer"
+              >
+                Programs &amp; Calendar
+              </button>
+              <button
+                type="button"
+                onClick={() => navigatePortal({ section: 'resolutions-funds' })}
+                className="hover:text-[#fde047] cursor-pointer"
+              >
+                Resolutions &amp; Funds
               </button>
               <button
                 type="button"
                 onClick={handleOpenHub}
-                className="text-amber-300 font-bold hover:text-amber-200 cursor-pointer"
+                className="text-[#fde047] font-extrabold hover:text-yellow-200 cursor-pointer pt-1"
               >
-                SSLG Hub / Records Login →
+                Admin Portal →
               </button>
             </div>
           </div>
         </div>
-        <div className="border-t border-slate-800/90 py-4 px-4 text-center text-[11px] text-slate-500">
-          NNCHS SSLG Official Digital Portal · SY {portalState.schoolYear} · Nabunturan, Davao de
-          Oro
+        <div className="border-t border-slate-800/90 py-4 px-4 text-center text-[11px] text-slate-400">
+          NNCHS Supreme Secondary Learner Government · SY {portalState.schoolYear} · Nabunturan, Davao
+          de Oro
         </div>
       </footer>
 
@@ -1199,9 +1208,9 @@ export default function App() {
       {toastMessage && (
         <div
           role="status"
-          className="no-print fixed bottom-5 right-5 z-50 bg-slate-900 dark:bg-slate-800 text-white px-4 py-3 rounded-xl shadow-xl border border-slate-700 text-xs font-semibold flex items-center gap-2"
+          className="no-print fixed bottom-5 right-5 z-50 bg-[#0f172a] text-white px-4 py-3 rounded-xl shadow-xl border border-[#facc15]/60 text-xs font-semibold flex items-center gap-2"
         >
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <CheckCircle2 className="w-4 h-4 text-[#fde047] shrink-0" />
           <span>{toastMessage}</span>
         </div>
       )}

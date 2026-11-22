@@ -1,192 +1,173 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
+  Camera,
   CheckCircle2,
-  Download,
   EyeOff,
   FileSearch,
   LockKeyhole,
-  Printer,
   Send,
-  ShieldAlert,
+  ShieldCheck,
   X,
 } from 'lucide-react';
 import {
-  downloadFileSafe,
-  generateTicketReceiptText,
-} from '../../lib/downloadEngine.ts';
-import {
   generateTicketCode,
+  readFileAsDataUrl,
   type GrievanceTicket,
   type PortalState,
+  type TicketCategory,
 } from '../../lib/portalStore.ts';
-import type { LetterheadDocumentPayload } from '../DocumentLetterheadModal.tsx';
-
-export type ReportingSubTab = 'submit' | 'track';
 
 export function ReportingDeskSection({
   portal,
-  initialSubTab = 'submit',
   onSubmitTicket,
-  onOpenLetterhead,
   onNotify,
 }: {
   portal: PortalState;
-  initialSubTab?: ReportingSubTab;
   onSubmitTicket: (ticket: GrievanceTicket) => void;
-  onOpenLetterhead: (doc: LetterheadDocumentPayload) => void;
   onNotify: (msg: string) => void;
 }) {
-  const [subTab, setSubTab] = useState<ReportingSubTab>(initialSubTab);
-
-  // Form
+  const [category, setCategory] = useState<TicketCategory>('Student Welfare / Anti-Bullying');
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [studentName, setStudentName] = useState('');
   const [gradeSection, setGradeSection] = useState('');
-  const [category, setCategory] = useState<GrievanceTicket['category']>(
-    'Campus Facilities & Safety'
-  );
   const [subject, setSubject] = useState('');
   const [details, setDetails] = useState('');
-  const [error, setError] = useState('');
-  const [receiptTicket, setReceiptTicket] = useState<GrievanceTicket | null>(null);
 
-  // Live Status Checker
+  // Conditional Student Welfare / Anti-Bullying fields
+  const [welfareWhatHappened, setWelfareWhatHappened] = useState('');
+  const [welfareWhoDidIt, setWelfareWhoDidIt] = useState('');
+  const [welfareNextAction, setWelfareNextAction] = useState('');
+
+  // Conditional Campus Facilities photo uploads
+  const [facilityPhotos, setFacilityPhotos] = useState<string[]>([]);
+
+  const [error, setError] = useState('');
+  const [submittedTicket, setSubmittedTicket] = useState<GrievanceTicket | null>(null);
+
+  // Private Status Checker by Tracking Code
   const [lookupCode, setLookupCode] = useState('');
   const [lookupResult, setLookupResult] = useState<GrievanceTicket | null>(null);
-  const [lookupSearched, setLookupSearched] = useState(false);
+  const [lookupAttempted, setLookupAttempted] = useState(false);
 
-  useEffect(() => {
-    setSubTab(initialSubTab);
-  }, [initialSubTab]);
+  const approvedPublicTickets = portal.tickets.filter((t) => t.approvedForPublic);
 
-  useEffect(() => {
-    if (!receiptTicket) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setReceiptTicket(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [receiptTicket]);
+  const handleFacilityPhotosChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    try {
+      const readAll = await Promise.all(
+        files.slice(0, 4).map(async (f) => readFileAsDataUrl(f))
+      );
+      setFacilityPhotos((prev) => [...prev, ...readAll].slice(0, 4));
+    } catch {
+      setError('Unable to read one of the selected facility photos.');
+    }
+    e.target.value = '';
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!isAnonymous && (!studentName.trim() || !gradeSection.trim())) {
-      setError('Please enter your Name and Grade & Section, or enable "Submit Anonymously".');
-      return;
-    }
-    if (!subject.trim() || !details.trim()) {
-      setError('Please provide a clear Subject and details of your concern or suggestion.');
+
+    if (category === 'Student Welfare / Anti-Bullying') {
+      if (!welfareWhatHappened.trim() || !welfareWhoDidIt.trim() || !welfareNextAction.trim()) {
+        setError(
+          'Please fill in What happened, Who did it, and What help you need so we can assist you properly.'
+        );
+        return;
+      }
+    } else if (!subject.trim() || !details.trim()) {
+      setError('Please provide a subject and details for your report.');
       return;
     }
 
     const nowIso = new Date().toISOString();
     const ticketCode = generateTicketCode(portal.tickets);
+    const derivedSubject =
+      subject.trim() ||
+      (category === 'Student Welfare / Anti-Bullying'
+        ? 'Student Welfare / Anti-Bullying Assistance Report'
+        : category);
+    const derivedDetails =
+      category === 'Student Welfare / Anti-Bullying'
+        ? `What happened: ${welfareWhatHappened.trim()}\nWho did it: ${welfareWhoDidIt.trim()}\nNeeded action: ${welfareNextAction.trim()}`
+        : details.trim();
+
     const created: GrievanceTicket = {
       id: `tkt-${Date.now()}`,
       ticketCode,
-      isAnonymous,
-      studentName: isAnonymous ? 'Anonymous Student' : studentName.trim(),
-      gradeSection: isAnonymous ? 'Undisclosed' : gradeSection.trim(),
       category,
-      subject: subject.trim(),
-      details: details.trim(),
-      status: 'Submitted',
+      isAnonymous,
+      studentName: isAnonymous ? 'Anonymous' : studentName.trim() || 'Not provided',
+      gradeSection: isAnonymous ? 'Undisclosed' : gradeSection.trim() || 'Not provided',
+      subject: derivedSubject,
+      details: derivedDetails,
+      welfareWhatHappened:
+        category === 'Student Welfare / Anti-Bullying' ? welfareWhatHappened.trim() : undefined,
+      welfareWhoDidIt:
+        category === 'Student Welfare / Anti-Bullying' ? welfareWhoDidIt.trim() : undefined,
+      welfareNextAction:
+        category === 'Student Welfare / Anti-Bullying' ? welfareNextAction.trim() : undefined,
+      facilityPhotos: category === 'Campus Facilities' ? facilityPhotos : [],
+      approvedForPublic: false,
+      status: 'Pending Approval',
       submittedAt: nowIso,
       updatedAt: nowIso,
-      publicRemarks: 'Logged on the NNCHS SSLG Welfare Desk. Pending initial officer review (within 48 school hours).',
+      adminResponse:
+        'Received by SSLG. Pending officer review and coordination with your Grade Level Learner Formation Officer.',
     };
 
     onSubmitTicket(created);
-    setReceiptTicket(created);
+    setSubmittedTicket(created);
     setLookupCode(created.ticketCode);
     setLookupResult(created);
-    setLookupSearched(true);
+    setLookupAttempted(true);
 
     setStudentName('');
     setGradeSection('');
     setSubject('');
     setDetails('');
+    setWelfareWhatHappened('');
+    setWelfareWhoDidIt('');
+    setWelfareNextAction('');
+    setFacilityPhotos([]);
+    onNotify(`Report ${created.ticketCode} submitted for SSLG review.`);
   };
 
   const handleLookup = (e: React.FormEvent) => {
     e.preventDefault();
+    setLookupAttempted(true);
     const clean = lookupCode.trim().toLowerCase();
-    setLookupSearched(true);
     if (!clean) {
       setLookupResult(null);
       return;
     }
-    const found = portal.tickets.find(
-      (t) => t.ticketCode.toLowerCase() === clean || t.ticketCode.toLowerCase().includes(clean)
-    );
+    const found = portal.tickets.find((t) => t.ticketCode.toLowerCase() === clean);
     setLookupResult(found || null);
   };
 
-  const openReceiptLetterhead = (t: GrievanceTicket) => {
-    onOpenLetterhead({
-      title: `Official Grievance Tracking Receipt — ${t.ticketCode}`,
-      docCode: t.ticketCode,
-      categoryLabel: 'Student Welfare & Grievance Desk',
-      dateLabel: new Date(t.submittedAt).toLocaleDateString('en-PH'),
-      filename: `${t.ticketCode}_Receipt.txt`,
-      bodyText: generateTicketReceiptText(t),
-    });
-  };
-
   return (
-    <section className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400">
-            Confidential &amp; Zero-Login Protection
-          </p>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 dark:text-white tracking-tight">
-            Student Reporting, Grievance &amp; Welfare Desk
-          </h2>
-          <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-            Raise facility repairs, academic issues, anti-bullying concerns, or campus suggestions
-            confidentially—with optional identity shielding.
-          </p>
-        </div>
-
-        <div className="flex gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200 dark:border-slate-700 self-start md:self-auto">
-          <button
-            type="button"
-            onClick={() => setSubTab('submit')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-              subTab === 'submit'
-                ? 'bg-white dark:bg-slate-900 text-blue-900 dark:text-blue-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-300'
-            }`}
-          >
-            Submit New Report
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('track')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-              subTab === 'track'
-                ? 'bg-white dark:bg-slate-900 text-blue-900 dark:text-blue-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-300'
-            }`}
-          >
-            Track Ticket Status
-          </button>
-        </div>
+    <section className="space-y-8">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-yellow-300">
+          Confidential Learner Support &amp; Campus Moderation
+        </p>
+        <h2 className="text-2xl sm:text-3xl font-extrabold text-blue-950 dark:text-white tracking-tight">
+          Grievance &amp; Welfare Reporting System
+        </h2>
+        <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
+          Submit Student Welfare concerns, Campus Facility reports with photos, or policy
+          suggestions. All submissions remain private until reviewed and approved by the SSLG Admin.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Submit Report Card */}
-        <div
-          className={`lg:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5 ${
-            subTab === 'track' ? 'hidden lg:block' : ''
-          }`}
-        >
+        {/* Guided Report Submission Form */}
+        <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
-            <h3 className="text-base font-extrabold text-slate-950 dark:text-white flex items-center gap-2">
-              <ShieldAlert className="w-5 h-5 text-rose-600 dark:text-rose-400" />
-              <span>File a Confidential Report</span>
+            <h3 className="text-base font-extrabold text-blue-950 dark:text-white flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-blue-700 dark:text-[#fde047]" />
+              <span>Submit New Report</span>
             </h3>
 
             <button
@@ -196,330 +177,352 @@ export function ReportingDeskSection({
               onClick={() => setIsAnonymous((v) => !v)}
               className={`px-3.5 py-2 rounded-xl border text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer ${
                 isAnonymous
-                  ? 'bg-slate-900 text-amber-300 border-slate-900 dark:bg-amber-500 dark:text-slate-950 dark:border-amber-500'
-                  : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                  ? 'bg-[#1e3a8a] text-[#fde047] border-blue-900'
+                  : 'bg-blue-50 dark:bg-slate-800 text-blue-950 dark:text-slate-200 border-blue-200 dark:border-slate-700'
               }`}
             >
-              {isAnonymous ? <EyeOff className="w-3.5 h-3.5" /> : <LockKeyhole className="w-3.5 h-3.5" />}
-              <span>{isAnonymous ? 'Anonymous Mode: ON' : 'Submit Anonymously'}</span>
+              {isAnonymous ? (
+                <EyeOff className="w-3.5 h-3.5" />
+              ) : (
+                <LockKeyhole className="w-3.5 h-3.5" />
+              )}
+              <span>{isAnonymous ? 'Anonymous Option: ON' : 'Submit Anonymously'}</span>
             </button>
           </div>
 
+          {/* Mandatory Post-Submission Confirmation Card */}
+          {submittedTicket && (
+            <div className="p-5 rounded-2xl bg-[#1e3a8a] text-white border-2 border-[#facc15] space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-[#facc15] shrink-0" />
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-[#fde047]">
+                      Tracking Reference Number
+                    </p>
+                    <p className="font-mono-code text-base font-extrabold">
+                      {submittedTicket.ticketCode}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSubmittedTicket(null)}
+                  aria-label="Dismiss notice"
+                  className="text-blue-200 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-sm leading-relaxed text-blue-50">
+                Your report has been received and will be reviewed by the SSLG.{' '}
+                <strong className="text-[#fde047]">
+                  Please notify your class adviser while we will also coordinate with the Learner
+                  Formation Officer in your grade level.
+                </strong>
+              </p>
+            </div>
+          )}
+
           {error && (
-            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs font-semibold text-rose-800 dark:text-rose-200">
+            <div className="p-3 rounded-xl bg-yellow-100 dark:bg-yellow-950/60 border border-[#eab308] text-xs font-bold text-slate-950 dark:text-yellow-200">
               {error}
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {isAnonymous ? (
-              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300">
-                <strong>Identity Shielded:</strong> Your name and section fields are hidden and will
-                not be stored on this ticket. Keep your generated{' '}
-                <span className="font-mono-code font-bold">NNCHS-SSLG-2026-XXXX</span> code to
-                follow official responses.
-              </div>
-            ) : (
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
+                Report Category *
+              </label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value as TicketCategory)}
+                className="w-full px-3.5 py-2.5 text-sm font-semibold rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+              >
+                <option value="Student Welfare / Anti-Bullying">
+                  Student Welfare / Anti-Bullying
+                </option>
+                <option value="Campus Facilities">Campus Facilities (Photo Upload Enabled)</option>
+                <option value="Academic / Policy Concern">Academic / Policy Concern</option>
+                <option value="General Suggestion">General Suggestion</option>
+              </select>
+            </div>
+
+            {!isAnonymous && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
-                    Your Full Name *
+                    Name (Optional)
                   </label>
                   <input
                     type="text"
-                    required={!isAnonymous}
                     value={studentName}
                     onChange={(e) => setStudentName(e.target.value)}
-                    placeholder="e.g., Maria Clara Santos"
-                    className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+                    placeholder="Your full name"
+                    className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
-                    Grade &amp; Section *
+                    Grade &amp; Section (Optional)
                   </label>
                   <input
                     type="text"
-                    required={!isAnonymous}
                     value={gradeSection}
                     onChange={(e) => setGradeSection(e.target.value)}
-                    placeholder="e.g., 10 - Gold"
-                    className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+                    placeholder="e.g., 9 - Narra"
+                    className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
                   />
                 </div>
               </div>
             )}
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
-                Concern Category *
-              </label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as GrievanceTicket['category'])}
-                className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
-              >
-                <option value="Campus Facilities & Safety">Campus Facilities &amp; Safety</option>
-                <option value="Student Welfare & Anti-Bullying">
-                  Student Welfare &amp; Anti-Bullying
-                </option>
-                <option value="Academic Concern">Academic Concern</option>
-                <option value="Club / Org Matter">Club / Org Matter</option>
-                <option value="Policy Suggestion">Policy Suggestion</option>
-              </select>
-            </div>
+            {/* Conditional Guided Welfare / Anti-Bullying Fields */}
+            {category === 'Student Welfare / Anti-Bullying' ? (
+              <div className="space-y-4 p-4 rounded-xl bg-blue-50/70 dark:bg-slate-800/70 border border-blue-200 dark:border-slate-700">
+                <div>
+                  <label className="block text-xs font-bold text-blue-950 dark:text-[#fde047] mb-1.5">
+                    1. What happened? *
+                  </label>
+                  <textarea
+                    rows={3}
+                    required
+                    value={welfareWhatHappened}
+                    onChange={(e) => setWelfareWhatHappened(e.target.value)}
+                    placeholder="Share clearly what happened, when, and where..."
+                    className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-blue-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
-                Subject / Headline *
-              </label>
-              <input
-                type="text"
-                required
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                placeholder="Brief summary of the concern or proposal"
-                className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
-              />
-            </div>
+                <div>
+                  <label className="block text-xs font-bold text-blue-950 dark:text-[#fde047] mb-1.5">
+                    2. Who did it? *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={welfareWhoDidIt}
+                    onChange={(e) => setWelfareWhoDidIt(e.target.value)}
+                    placeholder="Name/s, grade/section, or description of person/s involved"
+                    className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-blue-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
-                Full Details &amp; Location *
-              </label>
-              <textarea
-                rows={4}
-                required
-                value={details}
-                onChange={(e) => setDetails(e.target.value)}
-                placeholder="Describe what happened, where on campus, and suggested action..."
-                className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
-              />
-            </div>
+                <div>
+                  <label className="block text-xs font-bold text-blue-950 dark:text-[#fde047] mb-1.5">
+                    3. What do you think should be done next / What help do you need? *
+                  </label>
+                  <textarea
+                    rows={2}
+                    required
+                    value={welfareNextAction}
+                    onChange={(e) => setWelfareNextAction(e.target.value)}
+                    placeholder="Describe the immediate assistance or safety step you need..."
+                    className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-blue-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
+                    Subject / Concern Headline *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={subject}
+                    onChange={(e) => setSubject(e.target.value)}
+                    placeholder="Brief summary of your report or suggestion"
+                    className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
+                    Full Details &amp; Location *
+                  </label>
+                  <textarea
+                    rows={4}
+                    required
+                    value={details}
+                    onChange={(e) => setDetails(e.target.value)}
+                    placeholder="Include room number, building, or specific details..."
+                    className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+                  />
+                </div>
+              </>
+            )}
+
+            {/* Conditional Campus Facilities Multi-Photo Attachment */}
+            {category === 'Campus Facilities' && (
+              <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-slate-800/70 border border-blue-200 dark:border-slate-700 space-y-3">
+                <label className="block text-xs font-bold text-blue-950 dark:text-white">
+                  Attach Photos of Campus Facility Issue (Up to 4 photos)
+                </label>
+                <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#1e3a8a] hover:bg-[#1d4ed8] text-white text-xs font-bold cursor-pointer">
+                  <Camera className="w-4 h-4 text-[#fde047]" />
+                  <span>Upload Facility Photos</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleFacilityPhotosChange}
+                    className="hidden"
+                  />
+                </label>
+
+                {facilityPhotos.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                    {facilityPhotos.map((src, i) => (
+                      <div key={i} className="relative rounded-lg overflow-hidden border border-blue-200">
+                        <img
+                          src={src}
+                          alt={`Facility attachment ${i + 1}`}
+                          className="w-full h-20 object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFacilityPhotos((prev) => prev.filter((_, idx) => idx !== i))
+                          }
+                          aria-label="Remove photo"
+                          className="absolute top-1 right-1 p-0.5 rounded-full bg-slate-950/80 text-white cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <button
               type="submit"
-              className="w-full py-3 px-5 rounded-xl bg-[#1e3a8a] hover:bg-[#0f172a] dark:bg-blue-600 dark:hover:bg-blue-500 text-white text-sm font-bold inline-flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full py-3 px-5 rounded-xl bg-[#1e3a8a] hover:bg-[#1d4ed8] text-white text-sm font-extrabold inline-flex items-center justify-center gap-2 cursor-pointer transition-colors"
             >
-              <Send className="w-4 h-4" />
-              <span>Submit Report &amp; Generate Tracking ID</span>
+              <Send className="w-4 h-4 text-[#fde047]" />
+              <span>Submit Report for SSLG Review</span>
             </button>
           </form>
         </div>
 
-        {/* Live Public Ticket Status Checker */}
-        <div
-          className={`lg:col-span-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5 ${
-            subTab === 'submit' ? 'lg:block' : ''
-          }`}
-        >
-          <div>
-            <h3 className="text-base font-extrabold text-slate-950 dark:text-white flex items-center gap-2">
-              <FileSearch className="w-5 h-5 text-blue-800 dark:text-blue-400" />
-              <span>Live Ticket Status Checker</span>
+        {/* Right Column: Private Status Checker + Public Approved Concerns Feed */}
+        <div className="lg:col-span-5 space-y-6">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 space-y-4">
+            <h3 className="text-base font-extrabold text-blue-950 dark:text-white flex items-center gap-2">
+              <FileSearch className="w-5 h-5 text-blue-700 dark:text-[#fde047]" />
+              <span>Check Your Report Status</span>
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Enter your <span className="font-mono-code font-bold">NNCHS-SSLG-2026-XXXX</span> ID
-              (try <span className="font-mono-code font-semibold">NNCHS-SSLG-2026-8412</span>).
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Enter your private Tracking Reference Number (e.g.{' '}
+              <span className="font-mono-code font-bold">NNCHS-SSLG-2026-8412</span>).
             </p>
+
+            <form onSubmit={handleLookup} className="flex gap-2">
+              <input
+                type="text"
+                value={lookupCode}
+                onChange={(e) => setLookupCode(e.target.value)}
+                placeholder="NNCHS-SSLG-2026-XXXX"
+                className="flex-1 px-3.5 py-2 text-xs font-mono-code rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+              />
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-lg bg-[#facc15] hover:bg-[#eab308] text-slate-950 text-xs font-extrabold cursor-pointer whitespace-nowrap"
+              >
+                Check
+              </button>
+            </form>
+
+            {lookupAttempted && (
+              <div>
+                {lookupResult ? (
+                  <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-slate-800/70 border border-blue-200 dark:border-slate-700 space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono-code font-extrabold text-blue-900 dark:text-[#fde047]">
+                        {lookupResult.ticketCode}
+                      </span>
+                      <span className="font-bold text-blue-700 dark:text-blue-300">
+                        {lookupResult.status}
+                      </span>
+                    </div>
+                    <p className="font-bold text-slate-900 dark:text-white">
+                      {lookupResult.subject}
+                    </p>
+                    <p className="text-slate-600 dark:text-slate-300">
+                      <strong>Official Response:</strong> {lookupResult.adminResponse}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs font-semibold text-blue-800 dark:text-yellow-300">
+                    No report matched &ldquo;{lookupCode}&rdquo;. Verify your exact tracking number.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
-          <form onSubmit={handleLookup} className="flex gap-2">
-            <input
-              type="text"
-              value={lookupCode}
-              onChange={(e) => setLookupCode(e.target.value)}
-              placeholder="NNCHS-SSLG-2026-XXXX"
-              className="flex-1 px-3.5 py-2.5 text-xs font-mono-code rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
-            />
-            <button
-              type="submit"
-              className="px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-blue-900 dark:bg-blue-600 dark:hover:bg-blue-500 text-white text-xs font-bold cursor-pointer whitespace-nowrap"
-            >
-              Check Status
-            </button>
-          </form>
+          {/* Public Approved Concerns Feed (ONLY Approved Reports) */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-100 dark:border-slate-800 p-6 space-y-4">
+            <div>
+              <h3 className="text-base font-extrabold text-blue-950 dark:text-white">
+                Approved Public Concerns &amp; Actions
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Only campus concerns explicitly reviewed and approved by the SSLG Admin appear here.
+              </p>
+            </div>
 
-          {lookupSearched && (
-            <div className="pt-2">
-              {lookupResult ? (
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-3 text-xs">
+            <div className="space-y-3">
+              {approvedPublicTickets.map((item) => (
+                <div
+                  key={item.id}
+                  className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-blue-100 dark:border-slate-700 space-y-2 text-xs"
+                >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono-code font-extrabold text-blue-800 dark:text-blue-400">
-                      {lookupResult.ticketCode}
+                    <span className="font-bold text-blue-800 dark:text-[#fde047]">
+                      {item.category}
                     </span>
-                    <span
-                      className={`font-bold ${
-                        lookupResult.status === 'Resolved'
-                          ? 'text-emerald-700 dark:text-emerald-400'
-                          : lookupResult.status === 'Referred to Office'
-                          ? 'text-amber-700 dark:text-amber-400'
-                          : 'text-blue-700 dark:text-blue-300'
-                      }`}
-                    >
-                      {lookupResult.status}
+                    <span className="font-semibold text-slate-600 dark:text-slate-300">
+                      {item.status}
                     </span>
                   </div>
-                  <h4 className="text-sm font-bold text-slate-950 dark:text-white">
-                    {lookupResult.subject}
+                  <h4 className="text-sm font-bold text-blue-950 dark:text-white">
+                    {item.subject}
                   </h4>
-                  <p className="text-slate-600 dark:text-slate-300">
-                    <strong>Category:</strong> {lookupResult.category} ·{' '}
-                    <strong>Reporter:</strong> {lookupResult.studentName}
+                  <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {item.details}
                   </p>
-                  <div className="p-3 rounded-lg bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-                      Official SSLG Remarks
-                    </p>
-                    <p className="text-slate-800 dark:text-slate-200 leading-relaxed">
-                      {lookupResult.publicRemarks}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openReceiptLetterhead(lookupResult)}
-                      className="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-700 text-white font-bold inline-flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Printer className="w-3.5 h-3.5" />
-                      <span>Print Receipt</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        downloadFileSafe(
-                          `${lookupResult.ticketCode}_Receipt.txt`,
-                          generateTicketReceiptText(lookupResult),
-                          'text/plain;charset=utf-8',
-                          onNotify
-                        )
-                      }
-                      className="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-bold inline-flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Download .TXT</span>
-                    </button>
+                  {item.facilityPhotos.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      {item.facilityPhotos.map((src, idx) => (
+                        <img
+                          key={idx}
+                          src={src}
+                          alt={`Approved facility photo ${idx + 1}`}
+                          className="w-full h-16 object-cover rounded-lg border border-blue-200"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-100 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+                    <strong className="text-blue-900 dark:text-[#fde047]">SSLG Action:</strong>{' '}
+                    {item.adminResponse}
                   </div>
                 </div>
-              ) : (
-                <p className="text-xs text-rose-700 dark:text-rose-400 font-semibold">
-                  No ticket found with tracking ID &ldquo;{lookupCode}&rdquo;. Verify the code or
-                  pick from the recent tickets below.
+              ))}
+              {approvedPublicTickets.length === 0 && (
+                <p className="text-xs text-center text-slate-500 dark:text-slate-400 py-6">
+                  No approved public concerns posted yet.
                 </p>
               )}
-            </div>
-          )}
-
-          {/* Recent Public Sample / Quick Test Tickets */}
-          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Recent Public Reference Tickets
-            </p>
-            <div className="space-y-1.5">
-              {portal.tickets.slice(0, 4).map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => {
-                    setLookupCode(t.ticketCode);
-                    setLookupResult(t);
-                    setLookupSearched(true);
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-lg bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/50 dark:hover:bg-slate-800 flex items-center justify-between gap-2 text-xs cursor-pointer"
-                >
-                  <span className="font-mono-code font-bold text-blue-800 dark:text-blue-400">
-                    {t.ticketCode}
-                  </span>
-                  <span className="text-slate-500 dark:text-slate-400 truncate flex-1">
-                    {t.subject}
-                  </span>
-                  <span className="font-semibold text-slate-700 dark:text-slate-200 shrink-0">
-                    {t.status}
-                  </span>
-                </button>
-              ))}
             </div>
           </div>
         </div>
       </div>
-
-      {/* Receipt Confirmation Modal */}
-      {receiptTicket && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setReceiptTicket(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Tracking Receipt Generated"
-        >
-          <div
-            className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 py-4 bg-blue-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-amber-300" />
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-blue-200">
-                    Grievance Logged Successfully
-                  </p>
-                  <h3 className="font-mono-code text-base font-extrabold">
-                    {receiptTicket.ticketCode}
-                  </h3>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setReceiptTicket(null)}
-                aria-label="Close receipt modal"
-                className="p-1 text-blue-200 hover:text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 text-sm text-slate-700 dark:text-slate-200">
-              <p>
-                Save or print your official tracking code{' '}
-                <strong className="font-mono-code text-slate-950 dark:text-white">
-                  {receiptTicket.ticketCode}
-                </strong>
-                . You can check officer updates anytime in the Live Ticket Status Checker.
-              </p>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const t = receiptTicket;
-                    setReceiptTicket(null);
-                    openReceiptLetterhead(t);
-                  }}
-                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>View &amp; Print PDF Receipt</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    downloadFileSafe(
-                      `${receiptTicket.ticketCode}_Receipt.txt`,
-                      generateTicketReceiptText(receiptTicket),
-                      'text/plain;charset=utf-8',
-                      onNotify
-                    )
-                  }
-                  className="px-4 py-2 rounded-lg bg-slate-900 dark:bg-slate-800 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Receipt</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </section>
   );
 }

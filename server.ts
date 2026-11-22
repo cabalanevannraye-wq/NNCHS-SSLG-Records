@@ -207,6 +207,127 @@ async function startServer() {
     res.json({ status: 'ok', projectId: firebaseConfig.projectId, dynamicBackend: true });
   });
 
+  // Server-side CMS Admin Auth (scrypt + HMAC Bearer token, no hardcoded passwords)
+  const adminAuthFile = path.join(path.resolve(process.cwd(), 'data'), 'admin-auth.json');
+  const cmsTokenSecret = process.env.ADMIN_TOKEN_SECRET || crypto.randomBytes(32).toString('hex');
+
+  interface StoredAdminAuth {
+    username: string;
+    salt: string;
+    hash: string;
+    createdAt: string;
+  }
+
+  const readStoredAdminAuth = (): StoredAdminAuth | null => {
+    try {
+      if (!fs.existsSync(adminAuthFile)) return null;
+      const raw = fs.readFileSync(adminAuthFile, 'utf8');
+      const parsed = JSON.parse(raw) as Partial<StoredAdminAuth>;
+      if (parsed.username && parsed.salt && parsed.hash) {
+        return parsed as StoredAdminAuth;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const signCmsToken = (username: string): string => {
+    const payload = Buffer.from(
+      JSON.stringify({ sub: username, role: 'admin', exp: Date.now() + 12 * 60 * 60 * 1000 })
+    ).toString('base64url');
+    const sig = crypto.createHmac('sha256', cmsTokenSecret).update(payload).digest('base64url');
+    return `${payload}.${sig}`;
+  };
+
+  app.get('/api/admin/status', (_req, res) => {
+    const envConfigured = Boolean(process.env.ADMIN_PASSCODE && process.env.ADMIN_PASSCODE.trim());
+    const fileConfigured = Boolean(readStoredAdminAuth());
+    res.json({
+      backendAvailable: true,
+      configured: envConfigured || fileConfigured,
+      envManaged: envConfigured,
+    });
+  });
+
+  app.post('/api/admin/claim', (req, res) => {
+    const envPass = process.env.ADMIN_PASSCODE?.trim();
+    if (envPass || readStoredAdminAuth()) {
+      res.status(409).json({ error: 'Admin account is already configured.' });
+      return;
+    }
+    const { username, password } = req.body as { username?: string; password?: string };
+    const cleanUser = (username || '').trim().toLowerCase();
+    if (!cleanUser || cleanUser.length < 3) {
+      res.status(400).json({ error: 'Admin username must be at least 3 characters.' });
+      return;
+    }
+    if (!password || password.length < 6) {
+      res.status(400).json({ error: 'Admin password must be at least 6 characters.' });
+      return;
+    }
+
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+    const record: StoredAdminAuth = {
+      username: cleanUser,
+      salt,
+      hash,
+      createdAt: new Date().toISOString(),
+    };
+    const dataDir = path.dirname(adminAuthFile);
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(adminAuthFile, JSON.stringify(record, null, 2), 'utf8');
+
+    const token = signCmsToken(cleanUser);
+    res.status(201).json({ token, username: cleanUser });
+  });
+
+  app.post('/api/admin/login', (req, res) => {
+    const { username, password } = req.body as { username?: string; password?: string };
+    const cleanUser = (username || '').trim().toLowerCase();
+    if (!cleanUser || !password) {
+      res.status(400).json({ error: 'Username and password are required.' });
+      return;
+    }
+
+    const envPass = process.env.ADMIN_PASSCODE?.trim();
+    if (envPass) {
+      const envUser = (process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase();
+      const userMatch =
+        cleanUser.length === envUser.length &&
+        crypto.timingSafeEqual(Buffer.from(cleanUser), Buffer.from(envUser));
+      const a = crypto.createHash('sha256').update(password).digest();
+      const b = crypto.createHash('sha256').update(envPass).digest();
+      if (userMatch && crypto.timingSafeEqual(a, b)) {
+        res.json({ token: signCmsToken(envUser), username: envUser });
+        return;
+      }
+      res.status(401).json({ error: 'Invalid username or password.' });
+      return;
+    }
+
+    const stored = readStoredAdminAuth();
+    if (!stored) {
+      res.status(404).json({ error: 'No admin account configured yet.' });
+      return;
+    }
+
+    const derived = crypto.scryptSync(password, stored.salt, 64);
+    const expected = Buffer.from(stored.hash, 'hex');
+    const valid =
+      cleanUser === stored.username &&
+      derived.length === expected.length &&
+      crypto.timingSafeEqual(derived, expected);
+
+    if (!valid) {
+      res.status(401).json({ error: 'Invalid username or password.' });
+      return;
+    }
+
+    res.json({ token: signCmsToken(stored.username), username: stored.username });
+  });
+
   // Upload a prepared document or Stage 5 scanned hardcopy
   app.post('/api/files/upload', requireFirebaseAuth, upload.single('file'), (req, res) => {
     const file = req.file;

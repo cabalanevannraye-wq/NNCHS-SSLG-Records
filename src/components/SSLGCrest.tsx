@@ -56,7 +56,7 @@ export function UserAvatar({
   return (
     <div
       aria-label={fullName}
-      className={`${sizeClass} rounded-full bg-slate-800 text-white font-bold flex items-center justify-center border border-slate-700/20 shrink-0 select-none ${className}`}
+      className={`${sizeClass} rounded-full bg-[#1e3a8a] text-[#fde047] font-bold flex items-center justify-center border border-blue-700/40 shrink-0 select-none ${className}`}
     >
       {getInitials(fullName)}
     </div>
@@ -107,36 +107,36 @@ export function StageBadge({ stage }: { stage: WorkflowStage }) {
   switch (stage) {
     case 5:
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border rounded-md bg-emerald-50 text-emerald-800 border-emerald-200 whitespace-nowrap">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold border rounded-md bg-[#facc15] text-slate-950 border-[#eab308] whitespace-nowrap">
+          <CheckCircle2 className="w-3.5 h-3.5 text-blue-950 shrink-0" />
           <span>Stage 5 · Completed &amp; Archived</span>
         </span>
       );
     case 4:
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border rounded-md bg-indigo-50 text-indigo-800 border-indigo-200 whitespace-nowrap">
-          <Printer className="w-3.5 h-3.5 text-indigo-700 shrink-0" />
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border rounded-md bg-[#1e3a8a] text-white border-blue-900 whitespace-nowrap">
+          <Printer className="w-3.5 h-3.5 text-[#fde047] shrink-0" />
           <span>Stage 4 · Printed</span>
         </span>
       );
     case 3:
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border rounded-md bg-sky-50 text-sky-800 border-sky-200 whitespace-nowrap">
-          <Tag className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border rounded-md bg-blue-100 text-blue-900 border-blue-300 whitespace-nowrap">
+          <Tag className="w-3.5 h-3.5 text-blue-800 shrink-0" />
           <span>Stage 3 · Control No. &amp; Eartag</span>
         </span>
       );
     case 2:
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border rounded-md bg-amber-50 text-amber-800 border-amber-200 whitespace-nowrap">
-          <PenTool className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border rounded-md bg-yellow-100 text-slate-950 border-yellow-300 whitespace-nowrap">
+          <PenTool className="w-3.5 h-3.5 text-blue-900 shrink-0" />
           <span>Stage 2 · For E-Sign</span>
         </span>
       );
     default:
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border rounded-md bg-slate-100 text-slate-800 border-slate-300 whitespace-nowrap">
-          <FileUp className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border rounded-md bg-blue-50 text-blue-900 border-blue-200 whitespace-nowrap">
+          <FileUp className="w-3.5 h-3.5 text-blue-700 shrink-0" />
           <span>Stage 1 · Submitted</span>
         </span>
       );
