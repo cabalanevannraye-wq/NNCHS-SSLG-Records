@@ -36,8 +36,8 @@ import {
 } from '../../lib/downloadEngine.ts';
 import {
   DEFAULT_YORP_LOGO_PATH,
+  LIVE_DB_URL,
   PRINT_TIMELINE_STEPS,
-  SHARED_CLOUD_URL,
   exportPortalSnapshotJson,
   loadSyncConfig,
   normalizeCloudSyncUrl,
@@ -110,7 +110,10 @@ export function PortalAdminTabs({
 }: {
   activeTab: PortalAdminTabId;
   portal: PortalState;
-  onUpdatePortal: (updater: (prev: PortalState) => PortalState) => void;
+  onUpdatePortal: (
+    updater: (prev: PortalState) => PortalState,
+    options?: { immediate?: boolean }
+  ) => void;
   onNotify: (msg: string) => void;
   syncMode?: SyncConnectionMode;
   syncing?: boolean;
@@ -305,10 +308,13 @@ export function PortalAdminTabs({
     };
 
     const updateJobNotes = (jobId: string, adminNotes: string) => {
-      onUpdatePortal((prev) => ({
-        ...prev,
-        printJobs: prev.printJobs.map((j) => (j.id === jobId ? { ...j, adminNotes } : j)),
-      }));
+      onUpdatePortal(
+        (prev) => ({
+          ...prev,
+          printJobs: prev.printJobs.map((j) => (j.id === jobId ? { ...j, adminNotes } : j)),
+        }),
+        { immediate: false }
+      );
     };
 
     const deleteJob = (jobId: string) => {
@@ -637,12 +643,16 @@ export function PortalAdminTabs({
       ticketId: string,
       patch: Partial<Pick<GrievanceTicket, 'status' | 'adminResponse'>>
     ) => {
-      onUpdatePortal((prev) => ({
-        ...prev,
-        tickets: prev.tickets.map((t) =>
-          t.id === ticketId ? { ...t, ...patch, updatedAt: new Date().toISOString() } : t
-        ),
-      }));
+      const isTypingOnly = 'adminResponse' in patch && !('status' in patch);
+      onUpdatePortal(
+        (prev) => ({
+          ...prev,
+          tickets: prev.tickets.map((t) =>
+            t.id === ticketId ? { ...t, ...patch, updatedAt: new Date().toISOString() } : t
+          ),
+        }),
+        { immediate: !isTypingOnly }
+      );
     };
 
     const deleteTicket = (ticketId: string) => {
@@ -1023,7 +1033,10 @@ export function PortalAdminTabs({
                   type="text"
                   value={portal.schoolYear}
                   onChange={(e) =>
-                    onUpdatePortal((prev) => ({ ...prev, schoolYear: e.target.value }))
+                    onUpdatePortal(
+                      (prev) => ({ ...prev, schoolYear: e.target.value }),
+                      { immediate: false }
+                    )
                   }
                   className="w-full px-3 py-2 text-xs font-bold rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
                 />
@@ -1036,7 +1049,10 @@ export function PortalAdminTabs({
                   type="url"
                   value={portal.messengerGroupUrl}
                   onChange={(e) =>
-                    onUpdatePortal((prev) => ({ ...prev, messengerGroupUrl: e.target.value }))
+                    onUpdatePortal(
+                      (prev) => ({ ...prev, messengerGroupUrl: e.target.value }),
+                      { immediate: false }
+                    )
                   }
                   className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
                 />
@@ -1051,7 +1067,10 @@ export function PortalAdminTabs({
                 rows={2}
                 value={portal.campusAdvisory}
                 onChange={(e) =>
-                  onUpdatePortal((prev) => ({ ...prev, campusAdvisory: e.target.value }))
+                  onUpdatePortal(
+                    (prev) => ({ ...prev, campusAdvisory: e.target.value }),
+                    { immediate: false }
+                  )
                 }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
               />
@@ -1065,13 +1084,16 @@ export function PortalAdminTabs({
                 rows={3}
                 value={portal.tickerMessages.join('\n')}
                 onChange={(e) =>
-                  onUpdatePortal((prev) => ({
-                    ...prev,
-                    tickerMessages: e.target.value
-                      .split('\n')
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  }))
+                  onUpdatePortal(
+                    (prev) => ({
+                      ...prev,
+                      tickerMessages: e.target.value
+                        .split('\n')
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    }),
+                    { immediate: false }
+                  )
                 }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
               />
@@ -1127,12 +1149,15 @@ export function PortalAdminTabs({
                     type="text"
                     value={stat.label}
                     onChange={(e) =>
-                      onUpdatePortal((prev) => ({
-                        ...prev,
-                        impactStats: prev.impactStats.map((s) =>
-                          s.id === stat.id ? { ...s, label: e.target.value } : s
-                        ),
-                      }))
+                      onUpdatePortal(
+                        (prev) => ({
+                          ...prev,
+                          impactStats: prev.impactStats.map((s) =>
+                            s.id === stat.id ? { ...s, label: e.target.value } : s
+                          ),
+                        }),
+                        { immediate: false }
+                      )
                     }
                     className="col-span-7 px-2.5 py-1.5 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
                   />
@@ -1140,12 +1165,15 @@ export function PortalAdminTabs({
                     type="number"
                     value={stat.value}
                     onChange={(e) =>
-                      onUpdatePortal((prev) => ({
-                        ...prev,
-                        impactStats: prev.impactStats.map((s) =>
-                          s.id === stat.id ? { ...s, value: Number(e.target.value) || 0 } : s
-                        ),
-                      }))
+                      onUpdatePortal(
+                        (prev) => ({
+                          ...prev,
+                          impactStats: prev.impactStats.map((s) =>
+                            s.id === stat.id ? { ...s, value: Number(e.target.value) || 0 } : s
+                          ),
+                        }),
+                        { immediate: false }
+                      )
                     }
                     className="col-span-3 px-2.5 py-1.5 text-xs font-mono-code font-bold rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
                   />
@@ -1206,12 +1234,15 @@ export function PortalAdminTabs({
                     type="text"
                     value={slide.title}
                     onChange={(e) =>
-                      onUpdatePortal((prev) => ({
-                        ...prev,
-                        heroSlides: prev.heroSlides.map((s) =>
-                          s.id === slide.id ? { ...s, title: e.target.value } : s
-                        ),
-                      }))
+                      onUpdatePortal(
+                        (prev) => ({
+                          ...prev,
+                          heroSlides: prev.heroSlides.map((s) =>
+                            s.id === slide.id ? { ...s, title: e.target.value } : s
+                          ),
+                        }),
+                        { immediate: false }
+                      )
                     }
                     className="w-full px-2.5 py-1.5 font-bold rounded border border-blue-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-blue-950 dark:text-white"
                   />
@@ -1458,12 +1489,15 @@ export function PortalAdminTabs({
                     type="text"
                     value={item.caption}
                     onChange={(e) =>
-                      onUpdatePortal((prev) => ({
-                        ...prev,
-                        aboutPhotos: prev.aboutPhotos.map((p) =>
-                          p.id === item.id ? { ...p, caption: e.target.value } : p
-                        ),
-                      }))
+                      onUpdatePortal(
+                        (prev) => ({
+                          ...prev,
+                          aboutPhotos: prev.aboutPhotos.map((p) =>
+                            p.id === item.id ? { ...p, caption: e.target.value } : p
+                          ),
+                        }),
+                        { immediate: false }
+                      )
                     }
                     placeholder="Photo caption..."
                     className="w-full px-2.5 py-1.5 rounded border border-blue-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-blue-950 dark:text-white font-semibold"
@@ -1904,13 +1938,16 @@ export function PortalAdminTabs({
                 type="text"
                 value={portal.learnerServicesContact.officeLocation}
                 onChange={(e) =>
-                  onUpdatePortal((prev) => ({
-                    ...prev,
-                    learnerServicesContact: {
-                      ...prev.learnerServicesContact,
-                      officeLocation: e.target.value,
-                    },
-                  }))
+                  onUpdatePortal(
+                    (prev) => ({
+                      ...prev,
+                      learnerServicesContact: {
+                        ...prev.learnerServicesContact,
+                        officeLocation: e.target.value,
+                      },
+                    }),
+                    { immediate: false }
+                  )
                 }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
               />
@@ -1923,13 +1960,16 @@ export function PortalAdminTabs({
                 type="text"
                 value={portal.learnerServicesContact.officeHours}
                 onChange={(e) =>
-                  onUpdatePortal((prev) => ({
-                    ...prev,
-                    learnerServicesContact: {
-                      ...prev.learnerServicesContact,
-                      officeHours: e.target.value,
-                    },
-                  }))
+                  onUpdatePortal(
+                    (prev) => ({
+                      ...prev,
+                      learnerServicesContact: {
+                        ...prev.learnerServicesContact,
+                        officeHours: e.target.value,
+                      },
+                    }),
+                    { immediate: false }
+                  )
                 }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
               />
@@ -1942,13 +1982,16 @@ export function PortalAdminTabs({
                 type="text"
                 value={portal.learnerServicesContact.contactNumber}
                 onChange={(e) =>
-                  onUpdatePortal((prev) => ({
-                    ...prev,
-                    learnerServicesContact: {
-                      ...prev.learnerServicesContact,
-                      contactNumber: e.target.value,
-                    },
-                  }))
+                  onUpdatePortal(
+                    (prev) => ({
+                      ...prev,
+                      learnerServicesContact: {
+                        ...prev.learnerServicesContact,
+                        contactNumber: e.target.value,
+                      },
+                    }),
+                    { immediate: false }
+                  )
                 }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
               />
@@ -1961,13 +2004,16 @@ export function PortalAdminTabs({
                 type="email"
                 value={portal.learnerServicesContact.email}
                 onChange={(e) =>
-                  onUpdatePortal((prev) => ({
-                    ...prev,
-                    learnerServicesContact: {
-                      ...prev.learnerServicesContact,
-                      email: e.target.value,
-                    },
-                  }))
+                  onUpdatePortal(
+                    (prev) => ({
+                      ...prev,
+                      learnerServicesContact: {
+                        ...prev.learnerServicesContact,
+                        email: e.target.value,
+                      },
+                    }),
+                    { immediate: false }
+                  )
                 }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
               />
@@ -1981,13 +2027,16 @@ export function PortalAdminTabs({
               type="text"
               value={portal.learnerServicesContact.serviceNote}
               onChange={(e) =>
-                onUpdatePortal((prev) => ({
-                  ...prev,
-                  learnerServicesContact: {
-                    ...prev.learnerServicesContact,
-                    serviceNote: e.target.value,
-                  },
-                }))
+                onUpdatePortal(
+                  (prev) => ({
+                    ...prev,
+                    learnerServicesContact: {
+                      ...prev.learnerServicesContact,
+                      serviceNote: e.target.value,
+                    },
+                  }),
+                  { immediate: false }
+                )
               }
               className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
             />
@@ -2131,12 +2180,15 @@ export function PortalAdminTabs({
                   type="text"
                   value={off.bio}
                   onChange={(e) =>
-                    onUpdatePortal((prev) => ({
-                      ...prev,
-                      officers: prev.officers.map((o) =>
-                        o.id === off.id ? { ...o, bio: e.target.value } : o
-                      ),
-                    }))
+                    onUpdatePortal(
+                      (prev) => ({
+                        ...prev,
+                        officers: prev.officers.map((o) =>
+                          o.id === off.id ? { ...o, bio: e.target.value } : o
+                        ),
+                      }),
+                      { immediate: false }
+                    )
                   }
                   placeholder="Edit officer bio..."
                   className="w-full px-2.5 py-1.5 rounded border border-blue-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px]"
@@ -2411,7 +2463,7 @@ export function PortalAdminTabs({
               type="url"
               value={syncApiUrlInput}
               onChange={(e) => setSyncApiUrlInput(e.target.value)}
-              placeholder={SHARED_CLOUD_URL}
+              placeholder={LIVE_DB_URL}
               className="w-full px-3 py-2 text-xs rounded-lg border border-blue-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
             />
           </div>
@@ -2660,12 +2712,15 @@ export function PortalAdminTabs({
                 type="text"
                 value={f.category}
                 onChange={(e) =>
-                  onUpdatePortal((prev) => ({
-                    ...prev,
-                    funds: prev.funds.map((item) =>
-                      item.id === f.id ? { ...item, category: e.target.value } : item
-                    ),
-                  }))
+                  onUpdatePortal(
+                    (prev) => ({
+                      ...prev,
+                      funds: prev.funds.map((item) =>
+                        item.id === f.id ? { ...item, category: e.target.value } : item
+                      ),
+                    }),
+                    { immediate: false }
+                  )
                 }
                 className="md:col-span-4 px-2.5 py-1.5 font-bold rounded border border-blue-200 dark:border-slate-600 bg-white dark:bg-slate-900"
               />
@@ -2674,14 +2729,17 @@ export function PortalAdminTabs({
                   type="number"
                   value={f.allocatedAmount}
                   onChange={(e) =>
-                    onUpdatePortal((prev) => ({
-                      ...prev,
-                      funds: prev.funds.map((item) =>
-                        item.id === f.id
-                          ? { ...item, allocatedAmount: Number(e.target.value) || 0 }
-                          : item
-                      ),
-                    }))
+                    onUpdatePortal(
+                      (prev) => ({
+                        ...prev,
+                        funds: prev.funds.map((item) =>
+                          item.id === f.id
+                            ? { ...item, allocatedAmount: Number(e.target.value) || 0 }
+                            : item
+                        ),
+                      }),
+                      { immediate: false }
+                    )
                   }
                   aria-label="Allocated amount"
                   className="w-full px-2.5 py-1.5 font-mono-code rounded border border-blue-200 dark:border-slate-600 bg-white dark:bg-slate-900"
@@ -2692,14 +2750,17 @@ export function PortalAdminTabs({
                   type="number"
                   value={f.spentAmount}
                   onChange={(e) =>
-                    onUpdatePortal((prev) => ({
-                      ...prev,
-                      funds: prev.funds.map((item) =>
-                        item.id === f.id
-                          ? { ...item, spentAmount: Number(e.target.value) || 0 }
-                          : item
-                      ),
-                    }))
+                    onUpdatePortal(
+                      (prev) => ({
+                        ...prev,
+                        funds: prev.funds.map((item) =>
+                          item.id === f.id
+                            ? { ...item, spentAmount: Number(e.target.value) || 0 }
+                            : item
+                        ),
+                      }),
+                      { immediate: false }
+                    )
                   }
                   aria-label="Disbursed amount"
                   className="w-full px-2.5 py-1.5 font-mono-code rounded border border-blue-200 dark:border-slate-600 bg-white dark:bg-slate-900"
@@ -2709,12 +2770,15 @@ export function PortalAdminTabs({
                 type="text"
                 value={f.notes}
                 onChange={(e) =>
-                  onUpdatePortal((prev) => ({
-                    ...prev,
-                    funds: prev.funds.map((item) =>
-                      item.id === f.id ? { ...item, notes: e.target.value } : item
-                    ),
-                  }))
+                  onUpdatePortal(
+                    (prev) => ({
+                      ...prev,
+                      funds: prev.funds.map((item) =>
+                        item.id === f.id ? { ...item, notes: e.target.value } : item
+                      ),
+                    }),
+                    { immediate: false }
+                  )
                 }
                 className="md:col-span-3 px-2.5 py-1.5 rounded border border-blue-200 dark:border-slate-600 bg-white dark:bg-slate-900"
               />

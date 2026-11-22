@@ -1,7 +1,8 @@
 import { buildApiUrl } from './api.ts';
 
-export const SHARED_CLOUD_URL =
-  'https://nnchs-g-portal-default-rtdb.asia-southeast1.firebasedatabase.app/portalState.json';
+export const LIVE_DB_URL =
+  'https://nnchs-g-live-default-rtdb.asia-southeast1.firebasedatabase.app/portalState.json';
+export const SHARED_CLOUD_URL = LIVE_DB_URL;
 export const PORTAL_STORAGE_KEY = 'nnchs_sslg_shared_state_v2';
 export const LEGACY_PORTAL_STORAGE_KEYS = [
   'nnchs_sslg_shared_state_v1',
@@ -19,9 +20,12 @@ export interface CloudSyncConfig {
 }
 
 export function normalizeCloudSyncUrl(raw?: string | null): string {
-  const clean = typeof raw === 'string' ? raw.trim() : '';
-  if (!clean) return SHARED_CLOUD_URL;
-  return clean.replace(/([^:]\/)\/+/g, '$1');
+  const clean = typeof raw === 'string' ? raw.trim().replace(/([^:]\/)\/+/g, '$1') : '';
+  if (!clean) return LIVE_DB_URL;
+  if (clean.includes('nnchs-g-portal-default-rtdb.asia-southeast1.firebasedatabase.app')) {
+    return LIVE_DB_URL;
+  }
+  return clean;
 }
 
 export interface AboutPhotoItem {
@@ -243,6 +247,8 @@ export interface LearnerServicesContact {
 
 export interface PortalState {
   syncUrl?: string;
+  liveSynced?: boolean;
+  arrayCounts?: Record<string, number>;
   schoolYear: string;
   campusAdvisory: string;
   tickerMessages: string[];
@@ -263,6 +269,38 @@ export interface PortalState {
   resolutions: LegislativeRecord[];
   learnerServicesContact: LearnerServicesContact;
   lastPublishedAt?: string;
+}
+
+const PORTAL_ARRAY_KEYS = [
+  'tickerMessages',
+  'heroSlides',
+  'aboutPhotos',
+  'impactStats',
+  'bulletinPosts',
+  'officers',
+  'clubs',
+  'printJobs',
+  'programs',
+  'lostFound',
+  'tickets',
+  'calendarEvents',
+  'funds',
+  'resolutions',
+] as const;
+
+type PortalArrayKey = (typeof PORTAL_ARRAY_KEYS)[number];
+
+export function withArrayMetadata(state: PortalState): PortalState {
+  const arrayCounts: Record<string, number> = {};
+  for (const key of PORTAL_ARRAY_KEYS) {
+    const val = state[key];
+    arrayCounts[key] = Array.isArray(val) ? val.length : 0;
+  }
+  return {
+    ...state,
+    liveSynced: true,
+    arrayCounts,
+  };
 }
 
 function makeGeometricSlideDataUri(
@@ -855,50 +893,92 @@ export function normalizeTicketCategory(raw: string | undefined): TicketCategory
   return 'Bullying / Learner Welfare';
 }
 
+function resolveNormalizedArray<K extends PortalArrayKey>(
+  parsed: Partial<PortalState>,
+  key: K,
+  preserveEmptyFromRemote: boolean
+): PortalState[K] {
+  const candidate = parsed[key];
+  if (Array.isArray(candidate)) {
+    return candidate as PortalState[K];
+  }
+  if (parsed.arrayCounts && typeof parsed.arrayCounts === 'object' && parsed.arrayCounts[key] === 0) {
+    return [] as unknown as PortalState[K];
+  }
+  if (preserveEmptyFromRemote) {
+    return [] as unknown as PortalState[K];
+  }
+  return DEFAULT_PORTAL_STATE[key];
+}
+
 export function normalizePortalState(parsed: Partial<PortalState> | null | undefined): PortalState {
   if (!parsed || typeof parsed !== 'object') {
     return DEFAULT_PORTAL_STATE;
   }
-  const normalizedJobs = Array.isArray(parsed.printJobs)
-    ? parsed.printJobs.map((job) => ({
-        ...job,
-        status: normalizePrintStatus(job?.status),
-      }))
-    : DEFAULT_PORTAL_STATE.printJobs;
 
-  const normalizedTickets = Array.isArray(parsed.tickets)
-    ? parsed.tickets.map((t) => ({
-        ...t,
-        category: normalizeTicketCategory(t?.category),
-        facilityPhotos: Array.isArray(t?.facilityPhotos) ? t.facilityPhotos : [],
-      }))
-    : DEFAULT_PORTAL_STATE.tickets;
+  const preserveEmptyFromRemote = Boolean(
+    parsed.liveSynced || parsed.lastPublishedAt || parsed.arrayCounts
+  );
 
-  return {
+  const rawJobs = resolveNormalizedArray(parsed, 'printJobs', preserveEmptyFromRemote);
+  const normalizedJobs = rawJobs.map((job) => ({
+    ...job,
+    status: normalizePrintStatus(job?.status),
+  }));
+
+  const rawTickets = resolveNormalizedArray(parsed, 'tickets', preserveEmptyFromRemote);
+  const normalizedTickets = rawTickets.map((t) => ({
+    ...t,
+    category: normalizeTicketCategory(t?.category),
+    facilityPhotos: Array.isArray(t?.facilityPhotos) ? t.facilityPhotos : [],
+    bullyingTypes: Array.isArray(t?.bullyingTypes) ? t.bullyingTypes : undefined,
+    supportPreferences: Array.isArray(t?.supportPreferences) ? t.supportPreferences : undefined,
+    evidenceFiles: Array.isArray(t?.evidenceFiles) ? t.evidenceFiles : undefined,
+  }));
+
+  const rawPrograms = resolveNormalizedArray(parsed, 'programs', preserveEmptyFromRemote);
+  const normalizedPrograms = rawPrograms.map((prog) => ({
+    ...prog,
+    photos: Array.isArray(prog?.photos) ? prog.photos : [],
+  }));
+
+  return withArrayMetadata({
     ...DEFAULT_PORTAL_STATE,
     ...parsed,
     syncUrl: normalizeCloudSyncUrl(parsed.syncUrl),
-    aboutPhotos:
-      Array.isArray(parsed.aboutPhotos) && parsed.aboutPhotos.length > 0
-        ? parsed.aboutPhotos
-        : DEFAULT_PORTAL_STATE.aboutPhotos,
+    tickerMessages: resolveNormalizedArray(parsed, 'tickerMessages', preserveEmptyFromRemote),
+    heroSlides: resolveNormalizedArray(parsed, 'heroSlides', preserveEmptyFromRemote),
+    aboutPhotos: resolveNormalizedArray(parsed, 'aboutPhotos', preserveEmptyFromRemote),
+    impactStats: resolveNormalizedArray(parsed, 'impactStats', preserveEmptyFromRemote),
+    bulletinPosts: resolveNormalizedArray(parsed, 'bulletinPosts', preserveEmptyFromRemote),
+    officers: resolveNormalizedArray(parsed, 'officers', preserveEmptyFromRemote),
+    clubs: resolveNormalizedArray(parsed, 'clubs', preserveEmptyFromRemote),
     printJobs: normalizedJobs,
+    programs: normalizedPrograms,
+    lostFound: resolveNormalizedArray(parsed, 'lostFound', preserveEmptyFromRemote),
     tickets: normalizedTickets,
+    calendarEvents: resolveNormalizedArray(parsed, 'calendarEvents', preserveEmptyFromRemote),
+    funds: resolveNormalizedArray(parsed, 'funds', preserveEmptyFromRemote),
+    resolutions: resolveNormalizedArray(parsed, 'resolutions', preserveEmptyFromRemote),
     learnerServicesContact: {
       ...DEFAULT_PORTAL_STATE.learnerServicesContact,
       ...(parsed.learnerServicesContact || {}),
     },
-  };
+  });
 }
 
 export function loadSyncConfig(): CloudSyncConfig {
   try {
     const raw = localStorage.getItem(SYNC_CONFIG_KEY);
-    if (!raw) return { syncApiUrl: SHARED_CLOUD_URL };
+    if (!raw) return { syncApiUrl: LIVE_DB_URL };
     const parsed = JSON.parse(raw) as Partial<CloudSyncConfig>;
-    return { syncApiUrl: normalizeCloudSyncUrl(parsed.syncApiUrl) };
+    const normalized = normalizeCloudSyncUrl(parsed.syncApiUrl);
+    if (normalized !== parsed.syncApiUrl) {
+      localStorage.setItem(SYNC_CONFIG_KEY, JSON.stringify({ syncApiUrl: normalized }));
+    }
+    return { syncApiUrl: normalized };
   } catch {
-    return { syncApiUrl: SHARED_CLOUD_URL };
+    return { syncApiUrl: LIVE_DB_URL };
   }
 }
 
@@ -926,21 +1006,22 @@ export function loadPortalState(): PortalState {
       }
     }
     if (!raw) {
-      localStorage.setItem(PORTAL_STORAGE_KEY, JSON.stringify(DEFAULT_PORTAL_STATE));
-      return DEFAULT_PORTAL_STATE;
+      const initial = withArrayMetadata(DEFAULT_PORTAL_STATE);
+      localStorage.setItem(PORTAL_STORAGE_KEY, JSON.stringify(initial));
+      return initial;
     }
     const parsed = JSON.parse(raw) as Partial<PortalState>;
     const normalized = normalizePortalState(parsed);
     localStorage.setItem(PORTAL_STORAGE_KEY, JSON.stringify(normalized));
     return normalized;
   } catch {
-    return DEFAULT_PORTAL_STATE;
+    return withArrayMetadata(DEFAULT_PORTAL_STATE);
   }
 }
 
 export function savePortalState(state: PortalState): void {
   try {
-    localStorage.setItem(PORTAL_STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(PORTAL_STORAGE_KEY, JSON.stringify(withArrayMetadata(state)));
   } catch {
     // ignore storage quota errors cleanly
   }
@@ -1137,10 +1218,13 @@ function unwrapCloudPayload(raw: unknown): { state: Partial<PortalState> | null;
   return { state: null, updatedAt: null };
 }
 
-export async function fetchFromCloud(syncApiUrl?: string): Promise<{
+let syncWriteChain: Promise<unknown> = Promise.resolve();
+
+export async function loadLivePublicData(syncApiUrl?: string): Promise<{
   state: PortalState | null;
   mode: SyncConnectionMode;
   updatedAt: string | null;
+  seeded?: boolean;
   error?: string;
 }> {
   const targetUrl = normalizeCloudSyncUrl(syncApiUrl ?? loadSyncConfig().syncApiUrl);
@@ -1150,6 +1234,31 @@ export async function fetchFromCloud(syncApiUrl?: string): Promise<{
     const res = await fetch(cacheBustedUrl, { method: 'GET', cache: 'no-store' });
     if (res.ok) {
       const data = (await res.json()) as unknown;
+      const isEmptyObject =
+        data !== null && typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length === 0;
+
+      if (data === null || isEmptyObject) {
+        // Database is completely empty on first-ever run: seed once with default NNCHS-SSLG data via PUT
+        const seededAt = new Date().toISOString();
+        const seededState = withArrayMetadata({
+          ...DEFAULT_PORTAL_STATE,
+          syncUrl: targetUrl,
+          lastPublishedAt: seededAt,
+        });
+        try {
+          const reqInit = buildCloudWriteRequest(targetUrl, seededState);
+          await fetch(targetUrl, {
+            method: reqInit.method,
+            headers: reqInit.headers,
+            body: reqInit.body,
+          });
+        } catch {
+          // Best-effort initial seed
+        }
+        savePortalState(seededState);
+        return { state: seededState, mode: 'cloud', updatedAt: seededAt, seeded: true };
+      }
+
       const unwrapped = unwrapCloudPayload(data);
       if (unwrapped.state) {
         const normalized = normalizePortalState({
@@ -1159,12 +1268,10 @@ export async function fetchFromCloud(syncApiUrl?: string): Promise<{
         savePortalState(normalized);
         return { state: normalized, mode: 'cloud', updatedAt: unwrapped.updatedAt };
       }
-      // Endpoint reachable but database is currently empty (`null`)
       return { state: null, mode: 'cloud', updatedAt: null };
     }
   } catch (err) {
-    // Fall through to optional shared Node server check below
-    const networkMsg = err instanceof Error ? err.message : 'Unable to reach cloud database.';
+    const networkMsg = err instanceof Error ? err.message : 'Unable to reach live cloud database.';
     try {
       const res = await fetch(buildApiUrl('/api/portal/state'), {
         method: 'GET',
@@ -1197,11 +1304,13 @@ export async function fetchFromCloud(syncApiUrl?: string): Promise<{
     state: null,
     mode: 'local',
     updatedAt: null,
-    error: `Cloud database at ${targetUrl} could not be loaded.`,
+    error: `Live database at ${targetUrl} could not be loaded.`,
   };
 }
 
-export async function publishToCloud(
+export const fetchFromCloud = loadLivePublicData;
+
+export function syncAdminChangesToPublic(
   state: PortalState,
   authToken?: string | null,
   syncApiUrl?: string
@@ -1212,79 +1321,148 @@ export async function publishToCloud(
   publishedState?: PortalState;
   error?: string;
 }> {
-  const targetUrl = normalizeCloudSyncUrl(syncApiUrl ?? state.syncUrl ?? loadSyncConfig().syncApiUrl);
-  const publishedAt = new Date().toISOString();
-  const compressed = await compressPortalImages(state);
-  const payloadState: PortalState = {
-    ...compressed,
-    syncUrl: targetUrl,
-    lastPublishedAt: publishedAt,
-  };
-  savePortalState(payloadState);
-
-  let cloudSynced = false;
-  let lastError: string | undefined;
-
-  try {
-    const reqInit = buildCloudWriteRequest(targetUrl, payloadState);
-    const res = await fetch(targetUrl, {
-      method: reqInit.method,
-      headers: reqInit.headers,
-      body: reqInit.body,
+  const runWrite = async (): Promise<{
+    ok: boolean;
+    mode: SyncConnectionMode;
+    updatedAt: string;
+    publishedState?: PortalState;
+    error?: string;
+  }> => {
+    const targetUrl = normalizeCloudSyncUrl(
+      syncApiUrl ?? state.syncUrl ?? loadSyncConfig().syncApiUrl
+    );
+    const publishedAt = new Date().toISOString();
+    const compressed = await compressPortalImages(state);
+    const payloadState = withArrayMetadata({
+      ...compressed,
+      syncUrl: targetUrl,
+      lastPublishedAt: publishedAt,
     });
-    if (res.ok) {
-      cloudSynced = true;
-    } else {
-      const detail = await res.text().catch(() => '');
-      lastError = `Cloud Sync HTTP ${res.status}${detail ? `: ${detail.slice(0, 120)}` : ''}`;
-    }
-  } catch (err) {
-    lastError =
-      err instanceof Error ? `Network error: ${err.message}` : 'Network error reaching Live Cloud URL.';
-  }
+    savePortalState(payloadState);
 
-  if (authToken) {
+    let cloudSynced = false;
+    let lastError: string | undefined;
+
     try {
-      await fetch(buildApiUrl('/api/portal/state'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({ state: payloadState }),
+      const reqInit = buildCloudWriteRequest(targetUrl, payloadState);
+      const res = await fetch(targetUrl, {
+        method: reqInit.method,
+        headers: reqInit.headers,
+        body: reqInit.body,
       });
-    } catch {
-      // Optional local Node mirror failed cleanly
+      if (res.ok) {
+        cloudSynced = true;
+      } else {
+        const detail = await res.text().catch(() => '');
+        lastError = `Cloud Sync HTTP ${res.status}${detail ? `: ${detail.slice(0, 120)}` : ''}`;
+      }
+    } catch (err) {
+      lastError =
+        err instanceof Error
+          ? `Network error: ${err.message}`
+          : 'Network error reaching Live Database URL.';
     }
-  }
 
-  if (cloudSynced) {
+    if (authToken) {
+      try {
+        await fetch(buildApiUrl('/api/portal/state'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({ state: payloadState }),
+        });
+      } catch {
+        // Optional local Node mirror failed cleanly
+      }
+    }
+
+    if (cloudSynced) {
+      return {
+        ok: true,
+        mode: 'cloud',
+        updatedAt: publishedAt,
+        publishedState: payloadState,
+      };
+    }
+
     return {
-      ok: true,
-      mode: 'cloud',
+      ok: false,
+      mode: 'local',
       updatedAt: publishedAt,
       publishedState: payloadState,
+      error: lastError || 'Unable to publish to live database endpoint.',
     };
-  }
-
-  return {
-    ok: false,
-    mode: 'local',
-    updatedAt: publishedAt,
-    publishedState: payloadState,
-    error: lastError || 'Unable to publish to live cloud endpoint.',
   };
+
+  const nextTask = syncWriteChain.then(runWrite, runWrite);
+  syncWriteChain = nextTask.catch(() => undefined);
+  return nextTask;
 }
+
+export const publishToCloud = syncAdminChangesToPublic;
 
 export async function submitPublicItemToCloud(
   kind: 'print-jobs' | 'lost-found' | 'tickets',
   item: PrintRequestJob | LostFoundItem | GrievanceTicket,
   updatedLocalState: PortalState,
   syncApiUrl?: string
-): Promise<{ synced: boolean; mode: SyncConnectionMode; error?: string }> {
-  const compressedState = await compressPortalImages({
-    ...updatedLocalState,
-    syncUrl: normalizeCloudSyncUrl(syncApiUrl ?? updatedLocalState.syncUrl),
+): Promise<{
+  synced: boolean;
+  mode: SyncConnectionMode;
+  mergedState?: PortalState;
+  error?: string;
+}> {
+  const targetUrl = normalizeCloudSyncUrl(
+    syncApiUrl ?? updatedLocalState.syncUrl ?? loadSyncConfig().syncApiUrl
+  );
+
+  let baseState = updatedLocalState;
+  try {
+    const remoteRes = await fetch(
+      `${targetUrl}${targetUrl.includes('?') ? '&' : '?'}t=${Date.now()}`,
+      { method: 'GET', cache: 'no-store' }
+    );
+    if (remoteRes.ok) {
+      const raw = (await remoteRes.json()) as unknown;
+      const unwrapped = unwrapCloudPayload(raw);
+      if (unwrapped.state) {
+        const remote = normalizePortalState({ ...unwrapped.state, syncUrl: targetUrl });
+        if (kind === 'print-jobs') {
+          const printItem = item as PrintRequestJob;
+          baseState = {
+            ...remote,
+            printJobs: remote.printJobs.some((j) => j.id === printItem.id)
+              ? remote.printJobs
+              : [printItem, ...remote.printJobs],
+          };
+        } else if (kind === 'lost-found') {
+          const lfItem = item as LostFoundItem;
+          baseState = {
+            ...remote,
+            lostFound: remote.lostFound.some((i) => i.id === lfItem.id)
+              ? remote.lostFound
+              : [lfItem, ...remote.lostFound],
+          };
+        } else {
+          const ticketItem = item as GrievanceTicket;
+          baseState = {
+            ...remote,
+            tickets: remote.tickets.some((t) => t.id === ticketItem.id)
+              ? remote.tickets
+              : [ticketItem, ...remote.tickets],
+          };
+        }
+      }
+    }
+  } catch {
+    // Fallback to updatedLocalState when offline
+  }
+
+  const compressedState = withArrayMetadata({
+    ...(await compressPortalImages(baseState)),
+    syncUrl: targetUrl,
     lastPublishedAt: new Date().toISOString(),
   });
   savePortalState(compressedState);
@@ -1293,7 +1471,6 @@ export async function submitPublicItemToCloud(
   let mode: SyncConnectionMode = 'local';
   let error: string | undefined;
 
-  const targetUrl = normalizeCloudSyncUrl(syncApiUrl ?? loadSyncConfig().syncApiUrl);
   try {
     const reqInit = buildCloudWriteRequest(targetUrl, compressedState);
     const res = await fetch(targetUrl, {
@@ -1325,7 +1502,7 @@ export async function submitPublicItemToCloud(
     // ignore if static host
   }
 
-  return { synced, mode, error };
+  return { synced, mode, mergedState: compressedState, error };
 }
 
 export function exportPortalSnapshotJson(state: PortalState): string {

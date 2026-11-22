@@ -104,13 +104,13 @@ import {
 } from './lib/firebaseService.ts';
 import { downloadDriveFileBlob } from './lib/googleDrive.ts';
 import {
-  fetchFromCloud,
   getActiveSyncEndpointInfo,
+  loadLivePublicData,
   loadPortalState,
   pingCloudEndpoint,
-  publishToCloud,
   savePortalState,
   submitPublicItemToCloud,
+  syncAdminChangesToPublic,
   type GrievanceTicket,
   type LostFoundItem,
   type PortalSectionId,
@@ -178,6 +178,8 @@ export default function App() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(
     () => portalState.lastPublishedAt ?? null
   );
+  const writeInFlightRef = useRef(0);
+  const debounceSyncTimerRef = useRef<number | null>(null);
 
   // Navigation & Sub-tab Control
   const [screenMode, setScreenMode] = useState<AppScreenMode>('portal');
@@ -323,9 +325,11 @@ export default function App() {
   };
 
   const handlePullCloudNow = async (silent = false) => {
+    if (silent && writeInFlightRef.current > 0) return;
     setSyncing(true);
     try {
-      const res = await fetchFromCloud();
+      const res = await loadLivePublicData();
+      if (silent && writeInFlightRef.current > 0) return;
       setSyncMode(res.mode);
       if (res.updatedAt) {
         setLastSyncedAt(res.updatedAt);
@@ -334,7 +338,11 @@ export default function App() {
         setPortalState(res.state);
         portalStateRef.current = res.state;
         if (!silent) {
-          notify('Synced latest published portal data across all devices.');
+          notify(
+            res.seeded
+              ? 'Live database initialized with NNCHS-SSLG default data.'
+              : 'Synced latest live portal data across all devices.'
+          );
         }
       } else if (!silent) {
         if (res.error) {
@@ -348,11 +356,12 @@ export default function App() {
     }
   };
 
-  const pushStateToCloud = async (targetState: PortalState, showToast = false) => {
+  const pushStateToCloud = async (targetState: PortalState, showToast = true) => {
     const token = await resolveActiveAuthToken();
+    writeInFlightRef.current += 1;
     setSyncing(true);
     try {
-      const res = await publishToCloud(targetState, token);
+      const res = await syncAdminChangesToPublic(targetState, token);
       setSyncMode(res.mode);
       setLastSyncedAt(res.updatedAt);
       if (res.publishedState) {
@@ -361,34 +370,45 @@ export default function App() {
       }
       if (showToast) {
         if (res.ok) {
-          notify('Published to Live Portal (Synced Across All Devices)');
+          notify('Published Live — Visible to All Visitors');
         } else {
           notify(res.error || 'Unable to reach Live Cloud URL.');
         }
       }
     } finally {
+      writeInFlightRef.current = Math.max(0, writeInFlightRef.current - 1);
       setSyncing(false);
     }
   };
 
   const handlePublishNow = async () => {
+    if (debounceSyncTimerRef.current) {
+      window.clearTimeout(debounceSyncTimerRef.current);
+      debounceSyncTimerRef.current = null;
+    }
     await pushStateToCloud(portalStateRef.current, true);
   };
 
   const handleImportSnapshot = async (imported: PortalState) => {
+    if (debounceSyncTimerRef.current) {
+      window.clearTimeout(debounceSyncTimerRef.current);
+      debounceSyncTimerRef.current = null;
+    }
     setPortalState(imported);
     portalStateRef.current = imported;
     savePortalState(imported);
-    await pushStateToCloud(imported, false);
-    notify('JSON Snapshot imported and synced cleanly.');
+    await pushStateToCloud(imported, true);
   };
 
-  const handleCommitAndSync = async (nextState: PortalState, successMessage: string) => {
+  const handleCommitAndSync = async (nextState: PortalState, _successMessage: string) => {
+    if (debounceSyncTimerRef.current) {
+      window.clearTimeout(debounceSyncTimerRef.current);
+      debounceSyncTimerRef.current = null;
+    }
     setPortalState(nextState);
     portalStateRef.current = nextState;
     savePortalState(nextState);
-    await pushStateToCloud(nextState, false);
-    notify(successMessage);
+    await pushStateToCloud(nextState, true);
   };
 
   const handlePingCloud = async () => {
@@ -425,6 +445,9 @@ export default function App() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (debounceSyncTimerRef.current) {
+        window.clearTimeout(debounceSyncTimerRef.current);
+      }
     };
   }, []);
 
@@ -436,12 +459,29 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [screenMode]);
 
-  const updatePortal = (updater: (prev: PortalState) => PortalState) => {
+  const updatePortal = (
+    updater: (prev: PortalState) => PortalState,
+    options?: { immediate?: boolean }
+  ) => {
     const next = updater(portalStateRef.current);
     portalStateRef.current = next;
     setPortalState(next);
     savePortalState(next);
-    void pushStateToCloud(next, false);
+
+    if (debounceSyncTimerRef.current) {
+      window.clearTimeout(debounceSyncTimerRef.current);
+      debounceSyncTimerRef.current = null;
+    }
+
+    if (options?.immediate === false) {
+      debounceSyncTimerRef.current = window.setTimeout(() => {
+        debounceSyncTimerRef.current = null;
+        void pushStateToCloud(portalStateRef.current, true);
+      }, 600);
+      return;
+    }
+
+    void pushStateToCloud(next, true);
   };
 
   useEffect(() => {
@@ -546,7 +586,7 @@ export default function App() {
     }, 60);
   };
 
-  // Public Portal Submission Handlers (Local + Shared Server / Cloud Sync)
+  // Public Portal Submission Handlers (Local + Live Shared Firebase Database)
   const handlePublicPrintJob = (job: PrintRequestJob) => {
     const next: PortalState = {
       ...portalStateRef.current,
@@ -555,7 +595,11 @@ export default function App() {
     portalStateRef.current = next;
     setPortalState(next);
     savePortalState(next);
-    void submitPublicItemToCloud('print-jobs', job, next).then(({ synced, mode }) => {
+    void submitPublicItemToCloud('print-jobs', job, next).then(({ synced, mode, mergedState }) => {
+      if (mergedState) {
+        portalStateRef.current = mergedState;
+        setPortalState(mergedState);
+      }
       if (synced) {
         setSyncMode(mode);
         setLastSyncedAt(new Date().toISOString());
@@ -571,7 +615,11 @@ export default function App() {
     portalStateRef.current = next;
     setPortalState(next);
     savePortalState(next);
-    void submitPublicItemToCloud('lost-found', item, next).then(({ synced, mode }) => {
+    void submitPublicItemToCloud('lost-found', item, next).then(({ synced, mode, mergedState }) => {
+      if (mergedState) {
+        portalStateRef.current = mergedState;
+        setPortalState(mergedState);
+      }
       if (synced) {
         setSyncMode(mode);
         setLastSyncedAt(new Date().toISOString());
@@ -587,7 +635,11 @@ export default function App() {
     portalStateRef.current = next;
     setPortalState(next);
     savePortalState(next);
-    void submitPublicItemToCloud('tickets', ticket, next).then(({ synced, mode }) => {
+    void submitPublicItemToCloud('tickets', ticket, next).then(({ synced, mode, mergedState }) => {
+      if (mergedState) {
+        portalStateRef.current = mergedState;
+        setPortalState(mergedState);
+      }
       if (synced) {
         setSyncMode(mode);
         setLastSyncedAt(new Date().toISOString());
